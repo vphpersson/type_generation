@@ -5,9 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	typeGeneratorErrors "github.com/vphpersson/type_generation/pkg/errors"
-	"github.com/vphpersson/type_generation/pkg/producers/typescript/errors"
-	typeGeneratorContext "github.com/vphpersson/type_generation/pkg/types/context"
+	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
+	typeGenerationContext "github.com/vphpersson/type_generation/pkg/types/context"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
 	"github.com/vphpersson/type_generation/pkg/types/type_declaration"
 
@@ -56,7 +55,7 @@ func isPrimitiveAlias(reflectType reflect.Type) bool {
 }
 
 type Context struct {
-	*typeGeneratorContext.Context
+	*typeGenerationContext.Context
 	GenerateNominalTypes bool
 }
 
@@ -69,14 +68,14 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 		if isTime(reflectType) {
 			typeScriptType = String
 		} else {
-			typeDeclaration, ok := c.TypeDeclarations[reflectType]
-			if !ok || utils.IsNil(typeDeclaration) {
-				return nil, motmedelErrors.NewWithTrace(typeGeneratorErrors.ErrNilTypeDeclaration)
+			typeDeclaration, err := motmedelMaps.MapGetNonZero(c.TypeDeclarations, reflectType)
+			if err != nil {
+				return nil, motmedelErrors.New(fmt.Errorf("map get non zero: %w", err), c.TypeDeclarations, reflectType)
 			}
 
-			interfaceDeclaration, ok := typeDeclaration.(*type_declaration.InterfaceDeclaration)
-			if !ok {
-				return nil, fmt.Errorf("unexpected type declaration type for struct: %T", typeDeclaration)
+			interfaceDeclaration, err := utils.Convert[*type_declaration.InterfaceDeclaration](typeDeclaration)
+			if err != nil {
+				return nil, motmedelErrors.New(fmt.Errorf("convert: %w", err), typeDeclaration)
 			}
 
 			typeReference := (&InterfaceDeclaration{InterfaceDeclaration: interfaceDeclaration, c: c}).TypeReference()
@@ -98,7 +97,7 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 					field, ok := reflectType.FieldByName(fieldName)
 					if !ok {
 						return nil, motmedelErrors.NewWithTrace(
-							typeGeneratorErrors.ErrNoStructField,
+							typeGenerationErrors.ErrNoStructField,
 							reflectType, fieldName,
 						)
 					}
@@ -168,12 +167,16 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 		//
 		// [1] https://www.typescriptlang.org/docs/handbook/advanced-types.html#index-types-and-index-signatures.
 		var indexType Type
-		if reflectType.Key().Kind() == reflect.String {
+		reflectTypeKeyKind := reflectType.Key().Kind()
+		if reflectTypeKeyKind == reflect.String {
 			indexType = String
-		} else if isNumber(reflectType.Key().Kind()) {
+		} else if isNumber(reflectTypeKeyKind) {
 			indexType = Number
 		} else {
-			return nil, fmt.Errorf("Go Kind %q cannot be used as a TypeScript index signature parameter type.", reflectType.Key().Kind())
+			return nil, motmedelErrors.NewWithTrace(
+				fmt.Errorf("%w: %T", typeGenerationErrors.ErrUnsupportedKind, reflectTypeKeyKind),
+				reflectTypeKeyKind,
+			)
 		}
 
 		valueType, err := c.getTypeScriptType(reflectType.Elem())
@@ -192,7 +195,7 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 	case reflect.Interface:
 		typeScriptType = Any
 	default:
-		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("%w: %T", errors.ErrUnsupportedKind, kind), kind)
+		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("%w: %T", typeGenerationErrors.ErrUnsupportedKind, kind), kind)
 	}
 
 	useTypeAlias := reflectType.Name() != "" &&
@@ -200,15 +203,17 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 		!isTime(reflectType)
 
 	if useTypeAlias {
-		typeDeclaration, ok := c.TypeDeclarations[reflectType]
-		if !ok || utils.IsNil(typeDeclaration) {
-			return nil, motmedelErrors.NewWithTrace(typeGeneratorErrors.ErrNilTypeDeclaration)
+		typeDeclaration, err := motmedelMaps.MapGet(c.TypeDeclarations, reflectType)
+		if err != nil {
+			return nil, motmedelErrors.New(fmt.Errorf("map get: %w", err), c.TypeDeclarations, reflectType)
 		}
 
-		if td, ok := typeDeclaration.(*type_declaration.TypeAliasDeclaration); ok {
-			return (&TypeAliasDeclaration{TypeAliasDeclaration: td, c: c}).TypeReference(), nil
+		typeAliasDeclaration, err := utils.Convert[*type_declaration.TypeAliasDeclaration](typeDeclaration)
+		if err != nil {
+			return nil, motmedelErrors.New(fmt.Errorf("convert: %w", err), typeDeclaration)
 		}
-		return nil, fmt.Errorf("unexpected type declaration type for alias: %T", typeDeclaration)
+
+		return (&TypeAliasDeclaration{TypeAliasDeclaration: typeAliasDeclaration, c: c}).TypeReference(), nil
 	}
 
 	return typeScriptType, nil
@@ -290,13 +295,15 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 		field := property.Field
 		if field == nil {
-			return "", motmedelErrors.NewWithTrace(typeGeneratorErrors.ErrNilField, property)
+			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
 		}
 
 		typeScriptType, err := t.c.getTypeScriptType(field.Type)
 		if err != nil {
 			return "", fmt.Errorf("get type script type: %w", err)
 		}
+
+		// Replace the field's type with the generic type parameter if the field uses the generic type parameter.
 
 		if genericTypeInfo != nil {
 			if fieldShape, ok := genericTypeInfo.FieldNameToShape[property.Identifier]; ok {
@@ -307,25 +314,30 @@ func (t *InterfaceDeclaration) String() (string, error) {
 					typeScriptType = &ArrayType{ItemsType: &TypeParameter{Identifier: fieldShape.Param}}
 				case shape.KindMapValue:
 					// Preserve the discovered key type from the reflect-populated MapType, replace value with param.
-					if mt, ok := typeScriptType.(*MapType); ok {
-						mt.ValueType = &TypeParameter{Identifier: fieldShape.Param}
-					} else {
-						panic(err)
+					mapType, err := utils.ConvertToNonZero[*MapType](typeScriptType)
+					if err != nil {
+						return "", fmt.Errorf("convert to non zero: %w", err)
 					}
+					mapType.ValueType = &TypeParameter{Identifier: fieldShape.Param}
 				case shape.KindMapKey:
 					// If the key is parameterized, ensure index is the parameter and keep value as-is.
-					if mt, ok := typeScriptType.(*MapType); ok {
-						mt.IndexType = &TypeParameter{Identifier: fieldShape.Param}
-					} else {
-						panic(err)
+					mapType, err := utils.ConvertToNonZero[*MapType](typeScriptType)
+					if err != nil {
+						return "", fmt.Errorf("convert to non zero: %w", err)
 					}
+					mapType.IndexType = &TypeParameter{Identifier: fieldShape.Param}
 				}
 			}
 		}
 
+		typeString, err := typeScriptType.String()
+		if err != nil {
+			return "", fmt.Errorf("type string: %w", err)
+		}
+
 		propertyStrings = append(
 			propertyStrings,
-			fmt.Sprintf("\t%s%s: %s;\n", property.Identifier, optionalString, typeScriptType.ToTypeScript()),
+			fmt.Sprintf("\t%s%s: %s;\n", property.Identifier, optionalString, typeString),
 		)
 	}
 
@@ -366,10 +378,9 @@ func (a *TypeAliasDeclaration) ToTypeScript() (string, error) {
 		return "", fmt.Errorf("get type script type: %w", err)
 	}
 
-	param := typeScriptType.ToTypeScript()
+	param, _ := typeScriptType.String()
 
 	if _, ok := typeScriptType.(*UnionType); !ok && a.c.GenerateNominalTypes {
-
 		return fmt.Sprintf(`    export type %s%s = %s & {
 		/**
 		* WARNING: Do not reference this field from application code.

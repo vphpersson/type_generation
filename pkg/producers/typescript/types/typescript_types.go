@@ -3,10 +3,13 @@ package types
 import (
 	"fmt"
 	"strings"
+
+	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
+	typescriptErrors "github.com/vphpersson/type_generation/pkg/producers/typescript/errors"
 )
 
 type Type interface {
-	ToTypeScript() string
+	String() (string, error)
 }
 
 type TypeDeclaration interface {
@@ -19,25 +22,29 @@ type TypeReference struct {
 	TypeArguments   []Type
 }
 
-func (t *TypeReference) ToTypeScript() string {
+func (t *TypeReference) String() (string, error) {
 	name := t.TypeDeclaration.QualifiedName()
 	if len(t.TypeArguments) == 0 {
-		return name
+		return name, nil
 	}
 
 	args := make([]string, 0, len(t.TypeArguments))
 	for _, a := range t.TypeArguments {
-		args = append(args, a.ToTypeScript())
+		typeStr, err := a.String()
+		if err != nil {
+			return "", fmt.Errorf("type string: %w", err)
+		}
+		args = append(args, typeStr)
 	}
 
-	return fmt.Sprintf("%s<%s>", name, strings.Join(args, ", "))
+	return fmt.Sprintf("%s<%s>", name, strings.Join(args, ", ")), nil
 }
 
 type TypeParameter struct {
 	Identifier string
 }
 
-func (p *TypeParameter) ToTypeScript() string { return p.Identifier }
+func (p *TypeParameter) String() (string, error) { return p.Identifier, nil }
 
 type BasicType string
 
@@ -49,18 +56,22 @@ const (
 	Any     = BasicType("any")
 )
 
-func (b BasicType) ToTypeScript() string { return string(b) }
+func (b BasicType) String() (string, error) { return string(b), nil }
 
 type UnionType struct {
 	Types []Type
 }
 
-func (u UnionType) ToTypeScript() string {
+func (u UnionType) String() (string, error) {
 	var tsTypes []string
 	for _, t := range u.Types {
-		tsTypes = append(tsTypes, t.ToTypeScript())
+		typeStr, err := t.String()
+		if err != nil {
+			return "", fmt.Errorf("type string: %w", err)
+		}
+		tsTypes = append(tsTypes, typeStr)
 	}
-	return strings.Join(tsTypes, " | ")
+	return strings.Join(tsTypes, " | "), nil
 }
 
 type MapType struct {
@@ -68,25 +79,38 @@ type MapType struct {
 	ValueType Type
 }
 
-// ToTypeScript implements the Type interface.
-func (m *MapType) ToTypeScript() string {
-	indexTypeToTS := m.IndexType.ToTypeScript()
-	if indexTypeToTS != "number" && indexTypeToTS != "string" {
-		panic(fmt.Sprintf("TypeScript type %q cannot be used as an index signature parameter type.", indexTypeToTS))
+func (m *MapType) String() (string, error) {
+	indexTypeString, err := m.IndexType.String()
+	if err != nil {
+		return "", fmt.Errorf("index type string: %w", err)
 	}
 
-	return fmt.Sprintf("{ [key: %s]: %s }", indexTypeToTS, m.ValueType.ToTypeScript())
+	if indexTypeString != "number" && indexTypeString != "string" {
+		return "", motmedelErrors.NewWithTrace(typescriptErrors.ErrUnsupportedIndexType, indexTypeString)
+	}
+
+	valueTypeString, err := m.ValueType.String()
+	if err != nil {
+		return "", fmt.Errorf("value type string: %w", err)
+	}
+
+	return fmt.Sprintf("{ [key: %s]: %s }", indexTypeString, valueTypeString), nil
 }
 
 type ArrayType struct {
 	ItemsType Type
 }
 
-// ToTypeScript implements the Type interface.
-func (a *ArrayType) ToTypeScript() string {
+func (a *ArrayType) String() (string, error) {
 	fmtStr := "%s[]"
 	if _, ok := a.ItemsType.(*UnionType); ok {
 		fmtStr = "(%s)[]"
 	}
-	return fmt.Sprintf(fmtStr, a.ItemsType.ToTypeScript())
+
+	typeStr, err := a.ItemsType.String()
+	if err != nil {
+		return "", fmt.Errorf("items type string: %w", err)
+	}
+
+	return fmt.Sprintf(fmtStr, typeStr), nil
 }
