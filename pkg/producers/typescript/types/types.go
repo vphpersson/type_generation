@@ -283,7 +283,11 @@ type InterfaceDeclaration struct {
 func (t *InterfaceDeclaration) String() (string, error) {
 	var propertyStrings []string
 
+	var typeParameters []string
 	genericTypeInfo := t.GenericTypeInfo
+	if genericTypeInfo != nil {
+		typeParameters = genericTypeInfo.TypeParameterNames
+	}
 
 	for _, property := range t.Properties {
 		optionalString := ""
@@ -344,7 +348,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 	return fmt.Sprintf(
 		"export interface %s%s {\n%s}",
 		t.Identifier,
-		renderTypeParams(t.TypeParameters),
+		renderTypeParams(typeParameters),
 		strings.Join(propertyStrings, ""),
 	), nil
 }
