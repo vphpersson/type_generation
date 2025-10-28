@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"go/ast"
 	"reflect"
-	"strings"
 
 	"github.com/vphpersson/type_generation/internal/generic_type_info"
-	typeGeneratorErrors "github.com/vphpersson/type_generation/pkg/errors"
+	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
 	"github.com/vphpersson/type_generation/pkg/types/type_declaration"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
 	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 )
+
+var caser = cases.Title(language.English)
 
 var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
 	reflect.Bool:    true,
@@ -83,7 +86,10 @@ func (g *Context) populateProperties(
 	optionalFieldPolicy optionalFieldPolicy,
 ) error {
 	structType = motmedelReflect.RemoveIndirection(structType)
-	// TODO: Should I check structType.Kind() == reflect.Struct?
+	structTypeKind := structType.Kind()
+	if structTypeKind != reflect.Struct {
+		return motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
+	}
 
 	// Iterate over normal fields first, and embedded structs last. This ensures that outer fields
 	// will take precedence over inner fields in the case of overlapping fields, which is consistent
@@ -160,7 +166,7 @@ func (g *Context) populateProperties(
 		if useTypeAlias {
 			if _, ok := g.TypeDeclarations[directType]; !ok {
 				typeName, _ := motmedelReflect.GetTypeName(directType)
-				identifier := strings.Title(typeName)
+				identifier := caser.String(typeName)
 				if identifier == "" {
 					identifier = g.makeUniqueAnonymousIdentifier()
 				}
@@ -205,8 +211,9 @@ func (g *Context) populateProperties(
 
 func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*type_declaration.InterfaceDeclaration, error) {
 	structType = motmedelReflect.RemoveIndirection(structType)
-	if structType.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("cannot declare interface for type %q", structType.Kind())
+	structTypeKind := structType.Kind()
+	if structTypeKind != reflect.Struct {
+		return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
 	}
 
 	if existingTypeDeclaration, ok := g.TypeDeclarations[structType]; ok {
@@ -214,7 +221,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	}
 
 	typeName, isGenericType := motmedelReflect.GetTypeName(structType)
-	interfaceName := strings.Title(typeName)
+	interfaceName := caser.String(typeName)
 	if interfaceName == "" {
 		interfaceName = g.makeUniqueAnonymousIdentifier()
 	}
@@ -233,7 +240,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 			return nil, fmt.Errorf("get generic type info: %w", err)
 		}
 		if genericTypeInfo == nil {
-			return nil, motmedelErrors.NewWithTrace(typeGeneratorErrors.ErrNilGenericTypeInfo)
+			return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilGenericTypeInfo)
 		}
 
 		interfaceDeclaration.GenericTypeInfo = genericTypeInfo

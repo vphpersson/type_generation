@@ -1,11 +1,13 @@
 package errors
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	ErrNilGenericTypeInfo = errors.New("nil generic type info")
-	ErrNilTypeDeclaration = errors.New("nil type declaration")
 	// TODO: Move?
-	ErrNilField = errors.New("nil field")
+	ErrNilField      = errors.New("nil field")
 	ErrNoStructField = errors.New("no struct field")
+	ErrUnsupportedKind = errors.New("unsupported kind")
 )

@@ -3,5 +3,5 @@ package errors
 import "errors"
 
 var (
-	ErrUnsupportedKind = errors.New("unsupported kind")
+	ErrUnsupportedIndexType = errors.New("unsupported index type")
 )
