@@ -14,7 +14,6 @@ type PropertySignature struct {
 
 type InterfaceDeclaration struct {
 	Identifier      string
-	TypeParameters  []string
 	Properties      []*PropertySignature
 	GenericTypeInfo *generic_type_info.GenericTypeInfo
 }

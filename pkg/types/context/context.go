@@ -244,7 +244,6 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 		}
 
 		interfaceDeclaration.GenericTypeInfo = genericTypeInfo
-		interfaceDeclaration.TypeParameters = genericTypeInfo.TypeParameterNames
 
 		for _, typeParameterName := range genericTypeInfo.TypeParameterNames {
 			fieldName := genericTypeInfo.TypeParameterNameToFieldName[typeParameterName]
@@ -296,7 +295,9 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	return interfaceDeclaration, nil
 }
 
-func (g *Context) Add(values ...any) error {
+func (g *Context) Add(values ...any) ([]*type_declaration.InterfaceDeclaration, error) {
+	var interfaceDeclarations []*type_declaration.InterfaceDeclaration
+
 	for _, value := range values {
 		var reflectType reflect.Type
 		switch v := value.(type) {
@@ -308,12 +309,15 @@ func (g *Context) Add(values ...any) error {
 			reflectType = reflect.TypeOf(v)
 		}
 
-		if _, err := g.GetOrCreateInterfaceDeclaration(reflectType); err != nil {
-			return fmt.Errorf("get or create interface declaration: %w", err)
+		interfaceDeclaration, err := g.GetOrCreateInterfaceDeclaration(reflectType)
+		if err != nil {
+			return nil, fmt.Errorf("get or create interface declaration: %w", err)
 		}
+
+		interfaceDeclarations = append(interfaceDeclarations, interfaceDeclaration)
 	}
 
-	return nil
+	return interfaceDeclarations, nil
 }
 
 func New() *Context {
