@@ -17,7 +17,7 @@ import (
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 )
 
-var caser = cases.Title(language.English)
+var caser = cases.Title(language.English, cases.NoLower)
 
 var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
 	reflect.Bool:    true,
