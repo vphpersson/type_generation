@@ -59,7 +59,7 @@ type Context struct {
 	GenerateNominalTypes bool
 }
 
-func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
+func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
 	var typeScriptType Type
@@ -121,7 +121,7 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 						}
 					}
 
-					typeArgument, err := c.getTypeScriptType(argReflectType)
+					typeArgument, err := c.GetTypeScriptType(argReflectType)
 					if err != nil {
 						return nil, fmt.Errorf("get type script type: %w", err)
 					}
@@ -179,14 +179,14 @@ func (c *Context) getTypeScriptType(reflectType reflect.Type) (Type, error) {
 			)
 		}
 
-		valueType, err := c.getTypeScriptType(reflectType.Elem())
+		valueType, err := c.GetTypeScriptType(reflectType.Elem())
 		if err != nil {
 			return nil, err
 		}
 
 		typeScriptType = &MapType{IndexType: indexType, ValueType: valueType}
 	case reflect.Slice, reflect.Array:
-		itemsType, err := c.getTypeScriptType(reflectType.Elem())
+		itemsType, err := c.GetTypeScriptType(reflectType.Elem())
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +302,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
 		}
 
-		typeScriptType, err := t.c.getTypeScriptType(field.Type)
+		typeScriptType, err := t.c.GetTypeScriptType(field.Type)
 		if err != nil {
 			return "", fmt.Errorf("get type script type: %w", err)
 		}
@@ -377,7 +377,7 @@ func (a *TypeAliasDeclaration) QualifiedName() string {
 func (a *TypeAliasDeclaration) ToTypeScript() (string, error) {
 	params := renderTypeParams(a.TypeParameters)
 
-	typeScriptType, err := a.c.getTypeScriptType(a.ReflectType)
+	typeScriptType, err := a.c.GetTypeScriptType(a.ReflectType)
 	if err != nil {
 		return "", fmt.Errorf("get type script type: %w", err)
 	}

@@ -10,7 +10,7 @@ import (
 
 func Convert(values ...any) (string, error) {
 	tsContext := types.Context{Context: typeGenerationTypesContext.New()}
-	if _, err := tsContext.Add(values...); err != nil {
+	if err := tsContext.Add(values...); err != nil {
 		return "", fmt.Errorf("add: %w", err)
 	}
 

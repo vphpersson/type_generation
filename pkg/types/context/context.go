@@ -295,9 +295,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	return interfaceDeclaration, nil
 }
 
-func (g *Context) Add(values ...any) ([]*type_declaration.InterfaceDeclaration, error) {
-	var interfaceDeclarations []*type_declaration.InterfaceDeclaration
-
+func (g *Context) Add(values ...any) error {
 	for _, value := range values {
 		var reflectType reflect.Type
 		switch v := value.(type) {
@@ -309,15 +307,23 @@ func (g *Context) Add(values ...any) ([]*type_declaration.InterfaceDeclaration, 
 			reflectType = reflect.TypeOf(v)
 		}
 
-		interfaceDeclaration, err := g.GetOrCreateInterfaceDeclaration(reflectType)
-		if err != nil {
-			return nil, fmt.Errorf("get or create interface declaration: %w", err)
+		reflectType = motmedelReflect.RemoveIndirection(reflectType)
+
+		switch reflectType.Kind() {
+		case reflect.Map, reflect.Slice, reflect.Array:
+			reflectType = motmedelReflect.RemoveIndirection(reflectType.Elem())
 		}
 
-		interfaceDeclarations = append(interfaceDeclarations, interfaceDeclaration)
+		if reflectType.Kind() != reflect.Struct {
+			continue
+		}
+
+		if _, err := g.GetOrCreateInterfaceDeclaration(reflectType); err != nil {
+			return fmt.Errorf("get or create interface declaration: %w", err)
+		}
 	}
 
-	return interfaceDeclarations, nil
+	return nil
 }
 
 func New() *Context {
