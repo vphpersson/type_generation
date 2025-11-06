@@ -13,7 +13,6 @@ import (
 	"golang.org/x/text/language"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
-	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 )
 
@@ -38,6 +37,10 @@ var numberKinds = map[reflect.Kind]bool{
 	reflect.Uint64:  true,
 	reflect.Float32: true,
 	reflect.Float64: true,
+}
+
+func isTime(t reflect.Type) bool {
+	return t.Name() == "Time" && t.PkgPath() == "time"
 }
 
 func isPrimitive(kind reflect.Kind) bool {
@@ -86,6 +89,7 @@ func (g *Context) populateProperties(
 	optionalFieldPolicy optionalFieldPolicy,
 ) error {
 	structType = motmedelReflect.RemoveIndirection(structType)
+
 	structTypeKind := structType.Kind()
 	if structTypeKind != reflect.Struct {
 		return motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
@@ -107,22 +111,7 @@ func (g *Context) populateProperties(
 			continue
 		}
 
-		// NOTE: Maybe this should not be here. Maybe it should be up to the output generator what struct tag to use.
-
 		propertyName := field.Name
-		optional := false
-
-		jsonTag := motmedelJsonTag.New(field.Tag.Get("json"))
-		if jsonTag != nil {
-			if jsonTag.Skip {
-				continue
-			}
-			if name := jsonTag.Name; name != "" {
-				propertyName = name
-			}
-
-			optional = jsonTag.OmitEmpty || jsonTag.OmitZero
-		}
 
 		// If there's already a field with the same name as the current field, we skip it. This can
 		// happen when populating the fields of an embedded struct, and the inner and outer structs
@@ -187,7 +176,7 @@ func (g *Context) populateProperties(
 			&type_declaration.PropertySignature{
 				Identifier: propertyName,
 				Field:      &field,
-				Optional:   optionalFieldPolicy == forceOptional || optional,
+				Optional:   optionalFieldPolicy == forceOptional,
 			},
 		)
 	}
@@ -214,6 +203,10 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	structTypeKind := structType.Kind()
 	if structTypeKind != reflect.Struct {
 		return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
+	}
+
+	if isTime(structType) {
+		return nil, nil
 	}
 
 	if existingTypeDeclaration, ok := g.TypeDeclarations[structType]; ok {
