@@ -11,6 +11,7 @@ import (
 	"github.com/vphpersson/type_generation/pkg/types/type_declaration"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
+	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
 	motmedelMaps "github.com/Motmedel/utils_go/pkg/maps"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
@@ -290,17 +291,36 @@ func (t *InterfaceDeclaration) String() (string, error) {
 	}
 
 	for _, property := range t.Properties {
-		optionalString := ""
-		if property.Optional {
-			optionalString = "?"
+		if property == nil {
+			continue
 		}
-
-		var typeScriptType Type
 
 		field := property.Field
 		if field == nil {
 			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
 		}
+
+		identifier := property.Identifier
+		optional := property.Optional
+
+		jsonTag := motmedelJsonTag.New(field.Tag.Get("json"))
+		if jsonTag != nil {
+			if jsonTag.Skip {
+				continue
+			}
+			if name := jsonTag.Name; name != "" {
+				identifier = name
+			}
+
+			optional = optional || jsonTag.OmitEmpty || jsonTag.OmitZero
+		}
+
+		optionalString := ""
+		if optional {
+			optionalString = "?"
+		}
+
+		var typeScriptType Type
 
 		typeScriptType, err := t.c.GetTypeScriptType(field.Type)
 		if err != nil {
@@ -341,7 +361,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 		propertyStrings = append(
 			propertyStrings,
-			fmt.Sprintf("\t%s%s: %s;\n", property.Identifier, optionalString, typeString),
+			fmt.Sprintf("\t%s%s: %s;\n", identifier, optionalString, typeString),
 		)
 	}
 
