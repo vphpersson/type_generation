@@ -42,7 +42,7 @@ func (a *AssociativeTable) String() (string, error) {
 	propertyStrings = append(propertyStrings, fmt.Sprintf("\tPRIMARY KEY (%s_id, %s_id)", a.SourceTableName, a.TargetTableName))
 
 	return fmt.Sprintf(
-		"CREATE TABLE %s (\n%s\n)",
+		"CREATE TABLE %s (\n%s\n);",
 		fmt.Sprintf("%s_%s", a.SourceTableName, a.TargetTableName),
 		strings.Join(propertyStrings, ",\n"),
 	), nil
