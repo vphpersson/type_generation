@@ -7,6 +7,7 @@ type Tag struct {
 	Skip            bool
 	Unique          bool
 	Nullable        bool
+	Indexed         bool
 	OnDelete        string
 	OnUpdate        string
 	Default         string
@@ -101,6 +102,8 @@ func New(tagString string) *Tag {
 			tag.Unique = true
 		case "nullable":
 			tag.Nullable = true
+		case "indexed":
+			tag.Indexed = true
 		default:
 			key, value, ok := strings.Cut(option, ":")
 			if ok {

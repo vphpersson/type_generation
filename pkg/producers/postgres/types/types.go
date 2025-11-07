@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
@@ -104,7 +105,7 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 
 		itemPostgresType, err := c.GetPostgresType(elemType)
 		if err != nil {
-			return nil, motmedelErrors.New(fmt.Errorf("get postgres type for array items: %w", err), elemType)
+			return nil, motmedelErrors.New(fmt.Errorf("context get postgres type: %w", err), elemType)
 		}
 
 		if typeReference, ok := itemPostgresType.(*TypeReference); ok {
@@ -140,7 +141,7 @@ func (c *Context) Render() (string, error) {
 		}
 		d, err := interfaceDeclaration.String()
 		if err != nil {
-			return "", motmedelErrors.New(fmt.Errorf("to type script: %w", err), interfaceDeclaration)
+			return "", motmedelErrors.New(fmt.Errorf("interface declaration string: %w", err), interfaceDeclaration)
 		}
 		stringBuilder.WriteString(d)
 		stringBuilder.WriteString("\n")
@@ -162,6 +163,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 	}
 
 	var tables []string
+	var indices []string
 
 	var propertyStrings []string
 	for _, property := range t.Properties {
@@ -177,7 +179,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		fieldType := field.Type
 		postgresType, err := t.c.GetPostgresType(fieldType)
 		if err != nil {
-			return "", motmedelErrors.New(fmt.Errorf("get postgres type: %w", err), fieldType)
+			return "", motmedelErrors.New(fmt.Errorf("context get postgres type: %w", err), fieldType)
 		}
 		if utils.IsNil(postgresType) {
 			return "", motmedelErrors.NewWithTrace(postgresErrors.ErrNilType)
@@ -215,6 +217,13 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 			if tagType := postgresTag.Type; tagType != "" {
 				typeString = tagType
+			}
+
+			if postgresTag.Indexed {
+				indices = append(
+					indices,
+					fmt.Sprintf("CREATE INDEX %[1]s_%[2]s_idx ON %[1]s(%[2]s);", t.QualifiedName(), identifier),
+				)
 			}
 
 			if _, ok := postgresType.(*TypeReference); ok {
@@ -270,13 +279,13 @@ func (t *InterfaceDeclaration) String() (string, error) {
 	tables = append(
 		tables,
 		fmt.Sprintf(
-			"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n)",
+			"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n);",
 			t.QualifiedName(),
 			strings.Join(propertyStrings, ",\n"),
 		),
 	)
 
-	return strings.Join(tables, "\n\n"), nil
+	return strings.Join(slices.Concat(tables, indices), "\n\n"), nil
 }
 
 func (t *InterfaceDeclaration) QualifiedName() string {
