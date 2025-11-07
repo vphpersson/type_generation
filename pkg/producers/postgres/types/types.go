@@ -162,7 +162,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		return "", motmedelErrors.NewWithTrace(postgresErrors.ErrGenericTypesUnsupported)
 	}
 
-	var tables []string
+	var associativeTables []string
 	var indices []string
 
 	var propertyStrings []string
@@ -192,7 +192,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 				return "", fmt.Errorf("type string: %w", err)
 			}
 
-			tables = append(tables, tableString)
+			associativeTables = append(associativeTables, tableString)
 			continue
 		}
 
@@ -276,16 +276,13 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		)
 	}
 
-	tables = append(
-		tables,
-		fmt.Sprintf(
-			"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n);",
-			t.QualifiedName(),
-			strings.Join(propertyStrings, ",\n"),
-		),
+	table := fmt.Sprintf(
+		"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n);",
+		t.QualifiedName(),
+		strings.Join(propertyStrings, ",\n"),
 	)
 
-	return strings.Join(slices.Concat(tables, indices), "\n\n"), nil
+	return strings.Join(slices.Concat(associativeTables, []string{table}, indices), "\n\n"), nil
 }
 
 func (t *InterfaceDeclaration) QualifiedName() string {
