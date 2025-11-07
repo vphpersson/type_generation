@@ -282,7 +282,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		strings.Join(propertyStrings, ",\n"),
 	)
 
-	return strings.Join(slices.Concat(associativeTables, []string{table}, indices), "\n\n"), nil
+	return strings.Join(slices.Concat([]string{table}, associativeTables, indices), "\n\n"), nil
 }
 
 func (t *InterfaceDeclaration) QualifiedName() string {
