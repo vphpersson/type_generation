@@ -253,7 +253,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 			}
 
 			if generatedStored := postgresTag.GeneratedStored; generatedStored != "" {
-				attributes = append(attributes, fmt.Sprintf("GENERATED AS (%s) STORED", generatedStored))
+				attributes = append(attributes, fmt.Sprintf("GENERATED ALWAYS AS (%s) STORED", generatedStored))
 			}
 
 			if check := postgresTag.Check; check != "" {
