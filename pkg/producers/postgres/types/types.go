@@ -156,7 +156,6 @@ type InterfaceDeclaration struct {
 }
 
 func (t *InterfaceDeclaration) String() (string, error) {
-
 	genericTypeInfo := t.GenericTypeInfo
 	if genericTypeInfo != nil {
 		return "", motmedelErrors.NewWithTrace(postgresErrors.ErrGenericTypesUnsupported)
@@ -165,7 +164,9 @@ func (t *InterfaceDeclaration) String() (string, error) {
 	var associativeTables []string
 	var indices []string
 
-	var propertyStrings []string
+	var propertyLines []string
+	var uniqueCompositeFields []string
+
 	for _, property := range t.Properties {
 		if property == nil {
 			continue
@@ -219,6 +220,14 @@ func (t *InterfaceDeclaration) String() (string, error) {
 				typeString = tagType
 			}
 
+			if postgresTag.Nullable {
+				optional = true
+			}
+
+			if postgresTag.UniqueComposite {
+				uniqueCompositeFields = append(uniqueCompositeFields, identifier)
+			}
+
 			if postgresTag.Indexed {
 				indices = append(
 					indices,
@@ -234,10 +243,6 @@ func (t *InterfaceDeclaration) String() (string, error) {
 				if onDelete := postgresTag.OnDelete; onDelete != "" {
 					attributes = append(attributes, fmt.Sprintf("ON DELETE %s", onDelete))
 				}
-			}
-
-			if postgresTag.Nullable {
-				optional = true
 			}
 
 			if postgresTag.Default != "" {
@@ -270,16 +275,23 @@ func (t *InterfaceDeclaration) String() (string, error) {
 			attributesString = fmt.Sprintf(" %s", strings.Join(attributes, " "))
 		}
 
-		propertyStrings = append(
-			propertyStrings,
+		propertyLines = append(
+			propertyLines,
 			fmt.Sprintf("\t%s %s%s", identifier, typeString, attributesString),
+		)
+	}
+
+	if len(uniqueCompositeFields) > 0 {
+		propertyLines = append(
+			propertyLines,
+			fmt.Sprintf("\tUNIQUE (%s)", strings.Join(uniqueCompositeFields, ", ")),
 		)
 	}
 
 	table := fmt.Sprintf(
 		"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n);",
 		t.QualifiedName(),
-		strings.Join(propertyStrings, ",\n"),
+		strings.Join(propertyLines, ",\n"),
 	)
 
 	return strings.Join(slices.Concat([]string{table}, associativeTables, indices), "\n\n"), nil
