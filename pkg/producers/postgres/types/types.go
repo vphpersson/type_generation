@@ -166,6 +166,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 	var propertyLines []string
 	var uniqueCompositeFields []string
+	var primaryKeyObserved bool
 
 	for _, property := range t.Properties {
 		if property == nil {
@@ -235,6 +236,11 @@ func (t *InterfaceDeclaration) String() (string, error) {
 				)
 			}
 
+			if postgresTag.PrimaryKey {
+				primaryKeyObserved = true
+				attributes = append(attributes, "PRIMARY KEY")
+			}
+
 			if _, ok := postgresType.(*TypeReference); ok {
 				if onUpdate := postgresTag.OnUpdate; onUpdate != "" {
 					attributes = append(attributes, fmt.Sprintf("ON UPDATE %s", onUpdate))
@@ -288,8 +294,15 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		)
 	}
 
+	if !primaryKeyObserved {
+		propertyLines = append(
+			propertyLines,
+			"\tid uuid PRIMARY KEY DEFAULT gen_random_uuid()",
+		)
+	}
+
 	table := fmt.Sprintf(
-		"CREATE TABLE %s (\n\tid uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n%s\n);",
+		"CREATE TABLE %s (\n%s\n);",
 		t.QualifiedName(),
 		strings.Join(propertyLines, ",\n"),
 	)
