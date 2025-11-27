@@ -29,21 +29,109 @@ func toSnakeCase(s string) string {
 	return strings.ToLower(s)
 }
 
+func resolveIdType(interfaceDeclaration *InterfaceDeclaration) (string, error) {
+	if interfaceDeclaration == nil || interfaceDeclaration.InterfaceDeclaration == nil || interfaceDeclaration.c == nil {
+		return "", nil
+	}
+
+	for _, property := range interfaceDeclaration.Properties {
+		if property == nil {
+			continue
+		}
+
+		propertyField := property.Field
+		if propertyField == nil {
+			continue
+		}
+
+		identifier := property.Identifier
+		var typeString string
+
+		postgresTag := tag.New(propertyField.Tag.Get("postgres"))
+		if postgresTag != nil {
+			if postgresTag.Skip {
+				continue
+			}
+
+			if name := postgresTag.Name; name != "" {
+				identifier = name
+			}
+
+			if tagType := postgresTag.Type; tagType != "" {
+				typeString = tagType
+			}
+		}
+
+		if identifier != "id" {
+			continue
+		}
+
+		if typeString == "" {
+			postgresType, err := interfaceDeclaration.c.GetPostgresType(property.Field.Type)
+			if err != nil {
+				return "", fmt.Errorf("context get postgres type: %w", err)
+			}
+			if utils.IsNil(postgresType) {
+				return "", motmedelErrors.NewWithTrace(postgresErrors.ErrNilType)
+			}
+
+			typeString, err = postgresType.String()
+			if err != nil {
+				return "", fmt.Errorf("postgres type string: %w", err)
+			}
+		}
+
+		return typeString, nil
+	}
+
+	return "", nil
+}
+
 type AssociativeTable struct {
-	SourceTableName string
-	TargetTableName string
+	Source *InterfaceDeclaration
+	Target *InterfaceDeclaration
 }
 
 func (a *AssociativeTable) String() (string, error) {
 	var propertyStrings []string
-	for _, name := range []string{a.SourceTableName, a.TargetTableName} {
-		propertyStrings = append(propertyStrings, fmt.Sprintf("\t%[1]s_id uuid NOT NULL REFERENCES %[1]s(id) ON DELETE CASCADE", name))
+
+	source := a.Source
+	if source == nil {
+		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (source)", postgresErrors.ErrNilInterfaceDeclaration))
 	}
-	propertyStrings = append(propertyStrings, fmt.Sprintf("\tPRIMARY KEY (%s_id, %s_id)", a.SourceTableName, a.TargetTableName))
+	sourceName := a.Source.QualifiedName()
+
+	sourceIdType, err := resolveIdType(source)
+	if err != nil {
+		return "", motmedelErrors.New(fmt.Errorf("resolve id type: %w", err), source)
+	}
+	if sourceIdType == "" {
+		sourceIdType = "uuid"
+	}
+
+	target := a.Target
+	if target == nil {
+		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (target)", postgresErrors.ErrNilInterfaceDeclaration))
+	}
+	targetName := a.Target.QualifiedName()
+
+	targetIdType, err := resolveIdType(target)
+	if err != nil {
+		return "", motmedelErrors.New(fmt.Errorf("resolve id type: %w", err), target)
+	}
+	if targetIdType == "" {
+		targetIdType = "uuid"
+	}
+
+	for _, nameAndType := range [][2]string{{sourceName, sourceIdType}, {targetName, targetIdType}} {
+		name, typ := nameAndType[0], nameAndType[1]
+		propertyStrings = append(propertyStrings, fmt.Sprintf("\t%[1]s_id %s NOT NULL REFERENCES %[1]s(id) ON DELETE CASCADE", name, typ))
+	}
+	propertyStrings = append(propertyStrings, fmt.Sprintf("\tPRIMARY KEY (%s_id, %s_id)", sourceName, targetName))
 
 	return fmt.Sprintf(
 		"CREATE TABLE %s (\n%s\n);",
-		fmt.Sprintf("%s_%s", a.SourceTableName, a.TargetTableName),
+		fmt.Sprintf("%s_%s", sourceName, targetName),
 		strings.Join(propertyStrings, ",\n"),
 	), nil
 }
@@ -109,7 +197,7 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 		}
 
 		if typeReference, ok := itemPostgresType.(*TypeReference); ok {
-			postgresType = &AssociativeTable{TargetTableName: typeReference.TypeDeclaration.QualifiedName()}
+			postgresType = &AssociativeTable{Target: typeReference.TypeDeclaration}
 		} else {
 			postgresType = &ArrayType{ItemsType: itemPostgresType}
 		}
@@ -188,7 +276,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		}
 
 		if associativeTable, ok := postgresType.(*AssociativeTable); ok {
-			associativeTable.SourceTableName = t.QualifiedName()
+			associativeTable.Source = t
 			tableString, err := associativeTable.String()
 			if err != nil {
 				return "", fmt.Errorf("type string: %w", err)
