@@ -12,10 +12,12 @@ type Tag struct {
 	Name         string
 	Skip         bool
 	Optional     bool
-	MinLength    int
-	MaxLength    int
-	Minimum      float64
-	Maximum      float64
+	MinLength    *int
+	MaxLength    *int
+	Minimum      *float64
+	Maximum      *float64
+	MaxItems     *int
+	MinItems     *int
 	Format       string
 	OtherOptions []string
 }
@@ -48,35 +50,50 @@ func New(tagString string) (*Tag, error) {
 		default:
 			key, value, ok := strings.Cut(option, ":")
 			if ok {
-				var err error
 				switch strings.ToLower(key) {
 				case "format":
 					tag.Format = value
 					continue
 				case "minlength":
-					tag.MinLength, err = strconv.Atoi(value)
+					minLength, err := strconv.Atoi(value)
 					if err != nil {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (minlength): %w", err))
 					}
+					tag.MinLength = &minLength
 					continue
 				case "maxlength":
-					tag.MaxLength, err = strconv.Atoi(value)
+					maxLength, err := strconv.Atoi(value)
 					if err != nil {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (maxlength): %w", err))
 					}
+					tag.MaxLength = &maxLength
 					continue
 				case "minimum":
-					tag.Minimum, err = strconv.ParseFloat(value, 64)
+					minimum, err := strconv.ParseFloat(value, 64)
 					if err != nil {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv parse float (minimum): %w", err))
 					}
+					tag.Minimum = &minimum
 					continue
 				case "maximum":
-					tag.Maximum, err = strconv.ParseFloat(value, 64)
+					maximum, err := strconv.ParseFloat(value, 64)
 					if err != nil {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv parse float (maximum): %w", err))
 					}
+					tag.Maximum = &maximum
 					continue
+				case "minitems":
+					minItems, err := strconv.Atoi(value)
+					if err != nil {
+						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (minitems): %w", err))
+					}
+					tag.MinItems = &minItems
+				case "maxitems":
+					maxItems, err := strconv.Atoi(value)
+					if err != nil {
+						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (maxitems): %w", err))
+					}
+					tag.MaxItems = &maxItems
 				}
 			}
 			tag.OtherOptions = append(tag.OtherOptions, option)

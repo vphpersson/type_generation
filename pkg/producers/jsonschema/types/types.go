@@ -144,10 +144,12 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type: %w", err), fieldType)
 		}
 
-		if t, ok := propertySchema["type"].(string); ok && t == "string" {
-			// By default, for required string fields, the minLength is 1.
-			if !isOptional {
-				propertySchema["minLength"] = "1"
+		if t, ok := propertySchema["type"].(string); ok {
+			switch t {
+			case "string":
+				propertySchema["minLength"] = 1
+			case "array":
+				propertySchema["minItems"] = 1
 			}
 		}
 
@@ -157,22 +159,30 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 			if f := strings.TrimSpace(jsonschemaTag.Format); f != "" {
 				propertySchema["format"] = f
 			}
-			// string constraints
-			if t, ok := propertySchema["type"].(string); ok && t == "string" {
-				if jsonschemaTag.MinLength > 0 {
-					propertySchema["minLength"] = jsonschemaTag.MinLength
-				}
-				if jsonschemaTag.MaxLength > 0 {
-					propertySchema["maxLength"] = jsonschemaTag.MaxLength
-				}
-			}
-			// number/integer constraints
-			if t, ok := propertySchema["type"].(string); ok && (t == "number" || t == "integer") {
-				if jsonschemaTag.Minimum != 0 {
-					propertySchema["minimum"] = jsonschemaTag.Minimum
-				}
-				if jsonschemaTag.Maximum != 0 {
-					propertySchema["maximum"] = jsonschemaTag.Maximum
+
+			if t, ok := propertySchema["type"].(string); ok {
+				switch t {
+				case "string":
+					if minLength := jsonschemaTag.MinLength; minLength != nil {
+						propertySchema["minLength"] = *minLength
+					}
+					if maxLength := jsonschemaTag.MaxLength; maxLength != nil {
+						propertySchema["maxLength"] = *maxLength
+					}
+				case "number", "integer":
+					if minimum := jsonschemaTag.Minimum; minimum != nil {
+						propertySchema["minimum"] = *minimum
+					}
+					if maximum := jsonschemaTag.Maximum; maximum != nil{
+						propertySchema["maximum"] = *maximum
+					}
+				case "array":
+					if minItems := jsonschemaTag.MinItems; minItems != nil {
+						propertySchema["minItems"] = *minItems
+					}
+					if maxItems := jsonschemaTag.MaxItems; maxItems != nil {
+						propertySchema["maxItems"] = *maxItems
+					}
 				}
 			}
 		}
