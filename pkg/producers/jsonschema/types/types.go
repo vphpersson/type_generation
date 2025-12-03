@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
+	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
 	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
@@ -113,7 +114,7 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 				continue
 			}
 
-			if name := strings.TrimSpace(jsonschemaTag.Name); name != "" {
+			if name := jsonschemaTag.Name; name != "" {
 				identifier = name
 			}
 
@@ -121,16 +122,19 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 				isOptional = true
 			}
 		} else {
-			// As a fallback, if there is a `json` tag with a name, use that name as the identifier.
+			// As a fallback, use the `json` tag.
 			jsonTagRaw := field.Tag.Get("json")
-			jsonTag, err := tag.New(jsonTagRaw)
-			if err != nil {
-				return nil, motmedelErrors.New(fmt.Errorf("json tag new: %w", err), jsonTagRaw)
-			}
+			jsonTag := motmedelJsonTag.New(jsonTagRaw)
 			if jsonTag != nil {
-				if name := strings.TrimSpace(jsonTag.Name); name != "" {
+				if jsonTag.Skip {
+					continue
+				}
+
+				if name := jsonTag.Name; name != "" {
 					identifier = name
 				}
+
+				isOptional = isOptional || jsonTag.OmitEmpty || jsonTag.OmitZero
 			}
 		}
 
@@ -138,6 +142,13 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 		propertySchema, err := c.GetJSONSchemaType(fieldType)
 		if err != nil {
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type: %w", err), fieldType)
+		}
+
+		if t, ok := propertySchema["type"].(string); ok && t == "string" {
+			// By default, for required string fields, the minLength is 1.
+			if !isOptional {
+				propertySchema["minLength"] = "1"
+			}
 		}
 
 		// Apply constraints from the jsonschema tag.
