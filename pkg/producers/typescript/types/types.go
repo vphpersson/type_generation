@@ -15,6 +15,7 @@ import (
 	motmedelMaps "github.com/Motmedel/utils_go/pkg/maps"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
+	jsonschemaTag "github.com/vphpersson/type_generation/pkg/producers/jsonschema/types/tag"
 )
 
 func isTime(t reflect.Type) bool {
@@ -303,24 +304,41 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		identifier := property.Identifier
 		optional := property.Optional
 
-		jsonTag := motmedelJsonTag.New(field.Tag.Get("json"))
-		if jsonTag != nil {
-			if jsonTag.Skip {
+		fieldTag := field.Tag
+
+		rawSchemaTag := fieldTag.Get("jsonschema")
+		schemaTag, err := jsonschemaTag.New(rawSchemaTag)
+		if err != nil {
+			return "", motmedelErrors.New(fmt.Errorf("jsonschema tag new: %w", err), schemaTag)
+		}
+		if schemaTag != nil {
+			if schemaTag.Skip {
 				continue
 			}
-			if name := jsonTag.Name; name != "" {
+
+			if name := schemaTag.Name; name != "" {
 				identifier = name
 			}
 
-			optional = optional || jsonTag.OmitEmpty || jsonTag.OmitZero
+			optional = optional || schemaTag.Optional
+		} else {
+			jsonTag := motmedelJsonTag.New(fieldTag.Get("json"))
+			if jsonTag != nil {
+				if jsonTag.Skip {
+					continue
+				}
+				if name := jsonTag.Name; name != "" {
+					identifier = name
+				}
+
+				optional = optional || jsonTag.OmitEmpty || jsonTag.OmitZero
+			}
 		}
 
 		optionalString := ""
 		if optional {
 			optionalString = "?"
 		}
-
-		var typeScriptType Type
 
 		typeScriptType, err := t.c.GetTypeScriptType(field.Type)
 		if err != nil {
