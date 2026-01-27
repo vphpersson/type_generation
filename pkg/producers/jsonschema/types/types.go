@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
+	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
@@ -97,7 +98,7 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 
 		field := property.Field
 		if field == nil {
-			return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
+			return nil, motmedelErrors.NewWithTrace(nil_error.New("property field"), property)
 		}
 
 		identifier := property.Identifier
@@ -173,7 +174,7 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 					if minimum := jsonschemaTag.Minimum; minimum != nil {
 						propertySchema["minimum"] = *minimum
 					}
-					if maximum := jsonschemaTag.Maximum; maximum != nil{
+					if maximum := jsonschemaTag.Maximum; maximum != nil {
 						propertySchema["maximum"] = *maximum
 					}
 				case "array":

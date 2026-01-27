@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
-	motmedelMaps "github.com/Motmedel/utils_go/pkg/maps"
+	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
 	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
@@ -72,7 +72,7 @@ func resolveIdType(interfaceDeclaration *InterfaceDeclaration) (string, error) {
 				return "", fmt.Errorf("context get postgres type: %w", err)
 			}
 			if utils.IsNil(postgresType) {
-				return "", motmedelErrors.NewWithTrace(postgresErrors.ErrNilType)
+				return "", motmedelErrors.NewWithTrace(nil_error.New("postgres type"))
 			}
 
 			typeString, err = postgresType.String()
@@ -97,7 +97,7 @@ func (a *AssociativeTable) String() (string, error) {
 
 	source := a.Source
 	if source == nil {
-		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (source)", postgresErrors.ErrNilInterfaceDeclaration))
+		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (source)", nil_error.New("interface declaration")))
 	}
 	sourceName := a.Source.QualifiedName()
 
@@ -111,7 +111,7 @@ func (a *AssociativeTable) String() (string, error) {
 
 	target := a.Target
 	if target == nil {
-		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (target)", postgresErrors.ErrNilInterfaceDeclaration))
+		return "", motmedelErrors.NewWithTrace(fmt.Errorf("%w (target)", nil_error.New("interface declaration")))
 	}
 	targetName := a.Target.QualifiedName()
 
@@ -154,7 +154,7 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 		if isTime(reflectType) {
 			postgresType = Timestamp
 		} else {
-			typeDeclaration, err := motmedelMaps.MapGetNonZero(c.TypeDeclarations, reflectType)
+			typeDeclaration, err := utils.MapGetNonZero(c.TypeDeclarations, reflectType)
 			if err != nil {
 				return nil, motmedelErrors.New(fmt.Errorf("map get non zero: %w", err), c.TypeDeclarations, reflectType)
 			}
@@ -263,7 +263,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 		field := property.Field
 		if field == nil {
-			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
+			return "", motmedelErrors.NewWithTrace(nil_error.New("property field"), property)
 		}
 
 		fieldType := field.Type
@@ -272,7 +272,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 			return "", motmedelErrors.New(fmt.Errorf("context get postgres type: %w", err), fieldType)
 		}
 		if utils.IsNil(postgresType) {
-			return "", motmedelErrors.NewWithTrace(postgresErrors.ErrNilType)
+			return "", motmedelErrors.NewWithTrace(nil_error.New("postgres type"))
 		}
 
 		if associativeTable, ok := postgresType.(*AssociativeTable); ok {
