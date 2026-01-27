@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"reflect"
 
+	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	"github.com/vphpersson/type_generation/internal/generic_type_info"
 	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
@@ -233,7 +234,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 			return nil, fmt.Errorf("get generic type info: %w", err)
 		}
 		if genericTypeInfo == nil {
-			return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilGenericTypeInfo)
+			return nil, motmedelErrors.NewWithTrace(nil_error.New("generic type info"))
 		}
 
 		interfaceDeclaration.GenericTypeInfo = genericTypeInfo

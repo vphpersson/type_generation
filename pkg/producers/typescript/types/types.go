@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
 	typeGenerationContext "github.com/vphpersson/type_generation/pkg/types/context"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
@@ -12,7 +13,6 @@ import (
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
 	motmedelJsonTag "github.com/Motmedel/utils_go/pkg/json/types/tag"
-	motmedelMaps "github.com/Motmedel/utils_go/pkg/maps"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 	"github.com/Motmedel/utils_go/pkg/utils"
 	jsonschemaTag "github.com/vphpersson/type_generation/pkg/producers/jsonschema/types/tag"
@@ -70,7 +70,7 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 		if isTime(reflectType) {
 			typeScriptType = String
 		} else {
-			typeDeclaration, err := motmedelMaps.MapGetNonZero(c.TypeDeclarations, reflectType)
+			typeDeclaration, err := utils.MapGetNonZero(c.TypeDeclarations, reflectType)
 			if err != nil {
 				return nil, motmedelErrors.New(fmt.Errorf("map get non zero: %w", err), c.TypeDeclarations, reflectType)
 			}
@@ -88,7 +88,7 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 					// Find a field in the generic struct that uses the generic type parameter.
 
 					typeParameterNameToFieldName := genericTypeInfo.TypeParameterNameToFieldName
-					fieldName, err := motmedelMaps.MapGet(typeParameterNameToFieldName, typeParameterName)
+					fieldName, err := utils.MapGet(typeParameterNameToFieldName, typeParameterName)
 					if err != nil {
 						return nil, motmedelErrors.New(
 							fmt.Errorf("map get: %w", err),
@@ -205,7 +205,7 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 		!isTime(reflectType)
 
 	if useTypeAlias {
-		typeDeclaration, err := motmedelMaps.MapGet(c.TypeDeclarations, reflectType)
+		typeDeclaration, err := utils.MapGet(c.TypeDeclarations, reflectType)
 		if err != nil {
 			return nil, motmedelErrors.New(fmt.Errorf("map get: %w", err), c.TypeDeclarations, reflectType)
 		}
@@ -298,7 +298,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 		field := property.Field
 		if field == nil {
-			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrNilField, property)
+			return "", motmedelErrors.NewWithTrace(nil_error.New("property field"), property)
 		}
 
 		identifier := property.Identifier
