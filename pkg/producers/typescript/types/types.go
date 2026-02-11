@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
@@ -46,6 +47,15 @@ var numberKinds = map[reflect.Kind]bool{
 	reflect.Uint64:  true,
 	reflect.Float32: true,
 	reflect.Float64: true,
+}
+
+var validTSIdentifier = regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*$`)
+
+func quotePropertyName(name string) string {
+	if validTSIdentifier.MatchString(name) {
+		return name
+	}
+	return fmt.Sprintf(`"%s"`, name)
 }
 
 func isPrimitive(kind reflect.Kind) bool {
@@ -379,7 +389,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 
 		propertyStrings = append(
 			propertyStrings,
-			fmt.Sprintf("\t%s%s: %s;\n", identifier, optionalString, typeString),
+			fmt.Sprintf("\t%s%s: %s;\n", quotePropertyName(identifier), optionalString, typeString),
 		)
 	}
 
