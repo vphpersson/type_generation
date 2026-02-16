@@ -17,8 +17,6 @@ import (
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 )
 
-var caser = cases.Title(language.English, cases.NoLower)
-
 var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
 	reflect.Bool:    true,
 	reflect.Uintptr: true,
@@ -95,6 +93,8 @@ func (g *Context) populateProperties(
 	if structTypeKind != reflect.Struct {
 		return motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
 	}
+
+	caser := cases.Title(language.English, cases.NoLower)
 
 	// Iterate over normal fields first, and embedded structs last. This ensures that outer fields
 	// will take precedence over inner fields in the case of overlapping fields, which is consistent
@@ -215,7 +215,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	}
 
 	typeName, isGenericType := motmedelReflect.GetTypeName(structType)
-	interfaceName := caser.String(typeName)
+	interfaceName := cases.Title(language.English, cases.NoLower).String(typeName)
 	if interfaceName == "" {
 		interfaceName = g.makeUniqueAnonymousIdentifier()
 	}
