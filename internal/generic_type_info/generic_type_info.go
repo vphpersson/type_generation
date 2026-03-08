@@ -10,6 +10,7 @@ import (
 	goTypes "go/types"
 	"os"
 	"reflect"
+	"strings"
 
 	"github.com/vphpersson/type_generation/pkg/types/generic_type_info"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
@@ -248,6 +249,127 @@ func discoverInWorkingDir(typeName string) (*generic_type_info.GenericTypeInfo, 
 	return nil, nil
 }
 
+func fullTypeName(t reflect.Type) string {
+	name := t.Name()
+	if name == "" {
+		return t.String()
+	}
+	if pkgPath := t.PkgPath(); pkgPath != "" {
+		return pkgPath + "." + name
+	}
+	return name
+}
+
+func parseTypeArgs(name string) []string {
+	idx := strings.Index(name, "[")
+	if idx == -1 {
+		return nil
+	}
+	inner := name[idx+1 : len(name)-1]
+
+	var args []string
+	depth := 0
+	start := 0
+	for i, c := range inner {
+		switch c {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(inner[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	args = append(args, strings.TrimSpace(inner[start:]))
+	return args
+}
+
+func matchTypeArg(fieldType reflect.Type, typeArgs []string) (int, shape.Kind, bool) {
+	ftn := fullTypeName(fieldType)
+	for i, arg := range typeArgs {
+		if ftn == arg {
+			return i, shape.KindDirect, true
+		}
+	}
+
+	switch fieldType.Kind() {
+	case reflect.Ptr:
+		ftn = fullTypeName(fieldType.Elem())
+		for i, arg := range typeArgs {
+			if ftn == arg {
+				return i, shape.KindPointer, true
+			}
+		}
+	case reflect.Slice:
+		ftn = fullTypeName(fieldType.Elem())
+		for i, arg := range typeArgs {
+			if ftn == arg {
+				return i, shape.KindSlice, true
+			}
+		}
+	case reflect.Array:
+		ftn = fullTypeName(fieldType.Elem())
+		for i, arg := range typeArgs {
+			if ftn == arg {
+				return i, shape.KindArray, true
+			}
+		}
+	case reflect.Map:
+		ftn = fullTypeName(fieldType.Elem())
+		for i, arg := range typeArgs {
+			if ftn == arg {
+				return i, shape.KindMapValue, true
+			}
+		}
+		ftn = fullTypeName(fieldType.Key())
+		for i, arg := range typeArgs {
+			if ftn == arg {
+				return i, shape.KindMapKey, true
+			}
+		}
+	}
+
+	return 0, 0, false
+}
+
+func discoverUsingReflection(structType reflect.Type) (*generic_type_info.GenericTypeInfo, error) {
+	typeArgs := parseTypeArgs(structType.Name())
+	if len(typeArgs) == 0 {
+		return nil, nil
+	}
+
+	paramNames := make([]string, len(typeArgs))
+	for i := range typeArgs {
+		paramNames[i] = fmt.Sprintf("T%d", i)
+	}
+
+	fieldNameToShape := map[string]shape.Shape{}
+	paramToField := map[string]string{}
+
+	for i := range structType.NumField() {
+		field := structType.Field(i)
+		argIdx, kind, ok := matchTypeArg(field.Type, typeArgs)
+		if !ok {
+			continue
+		}
+
+		paramName := paramNames[argIdx]
+		fieldNameToShape[field.Name] = shape.Shape{Param: paramName, Kind: kind}
+		if _, exists := paramToField[paramName]; !exists {
+			paramToField[paramName] = field.Name
+		}
+	}
+
+	return &generic_type_info.GenericTypeInfo{
+		TypeParameterNames:           paramNames,
+		FieldNameToShape:             fieldNameToShape,
+		TypeParameterNameToFieldName: paramToField,
+	}, nil
+}
+
 func GetGenericTypeInfo(structType reflect.Type) (*generic_type_info.GenericTypeInfo, error) {
 	structType = motmedelReflect.RemoveIndirection(structType)
 	if structType.Kind() != reflect.Struct {
@@ -266,6 +388,7 @@ func GetGenericTypeInfo(structType reflect.Type) (*generic_type_info.GenericType
 
 	var workingDirErr error
 	var importerErr error
+	var reflectionErr error
 	genericTypeInfo, workingDirErr = discoverInWorkingDir(typeName)
 
 	if genericTypeInfo == nil {
@@ -273,7 +396,11 @@ func GetGenericTypeInfo(structType reflect.Type) (*generic_type_info.GenericType
 	}
 
 	if genericTypeInfo == nil {
-		return nil, errors.Join(workingDirErr, importerErr)
+		genericTypeInfo, reflectionErr = discoverUsingReflection(structType)
+	}
+
+	if genericTypeInfo == nil {
+		return nil, errors.Join(workingDirErr, importerErr, reflectionErr)
 	}
 
 	return genericTypeInfo, nil
