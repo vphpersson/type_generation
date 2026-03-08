@@ -71,6 +71,8 @@ func (c *Context) GetJSONSchemaType(reflectType reflect.Type) (map[string]any, e
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type (map value): %w", err), value)
 		}
 		return map[string]any{"type": "object", "additionalProperties": valueSchema}, nil
+	case reflect.Interface:
+		return map[string]any{}, nil
 	case reflect.Pointer:
 		return c.GetJSONSchemaType(reflectType.Elem())
 	default:
