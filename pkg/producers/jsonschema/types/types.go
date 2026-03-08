@@ -208,19 +208,33 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 
 // RenderRoot builds a single JSON Schema document with the provided root type as the top-level schema
 // and all discovered interfaces included under $defs. References use local $refs to $defs.
+// If root is a slice or array of structs, the top-level schema describes an array whose items
+// reference the element type.
 func (c *Context) RenderRoot(root reflect.Type) (string, error) {
 	root = motmedelReflect.RemoveIndirection(root)
 
+	isArray := false
+	elemType := root
 	rootKind := root.Kind()
-	if rootKind != reflect.Struct {
+
+	switch rootKind {
+	case reflect.Slice, reflect.Array:
+		isArray = true
+		elemType = motmedelReflect.RemoveIndirection(root.Elem())
+		if elemType.Kind() != reflect.Struct {
+			return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, elemType.Kind())
+		}
+	case reflect.Struct:
+		// supported as-is
+	default:
 		return "", motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, rootKind)
 	}
 
-	rootTypeDeclaration, ok := c.TypeDeclarations[root]
+	rootTypeDeclaration, ok := c.TypeDeclarations[elemType]
 	if !ok {
 		return "", motmedelErrors.NewWithTrace(
 			fmt.Errorf("%w (root type)", motmedelErrors.ErrNotInMap),
-			root,
+			elemType,
 		)
 	}
 
@@ -252,11 +266,18 @@ func (c *Context) RenderRoot(root reflect.Type) (string, error) {
 
 	schemaMap := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema",
-		"title":   rootInterfaceDeclarationIdentifier,
 		"$defs":   defs,
 	}
-	// Reference the root schema via $defs to avoid duplicating the object at the top level
-	schemaMap["$ref"] = "#/$defs/" + rootInterfaceDeclarationIdentifier
+
+	if isArray {
+		schemaMap["title"] = rootInterfaceDeclarationIdentifier + "Array"
+		schemaMap["type"] = "array"
+		schemaMap["items"] = map[string]any{"$ref": "#/$defs/" + rootInterfaceDeclarationIdentifier}
+	} else {
+		schemaMap["title"] = rootInterfaceDeclarationIdentifier
+		// Reference the root schema via $defs to avoid duplicating the object at the top level
+		schemaMap["$ref"] = "#/$defs/" + rootInterfaceDeclarationIdentifier
+	}
 
 	data, err := json.Marshal(schemaMap)
 	if err != nil {
