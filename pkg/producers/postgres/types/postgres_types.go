@@ -24,6 +24,7 @@ const (
 	BigInt          = BasicType("bigint")
 	Timestamp       = BasicType("timestamptz")
 	ByteA           = BasicType("bytea")
+	Jsonb           = BasicType("jsonb")
 	CiText          = BasicType("citext")
 )
 

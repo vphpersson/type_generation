@@ -201,6 +201,8 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 		} else {
 			postgresType = &ArrayType{ItemsType: itemPostgresType}
 		}
+	case reflect.Interface:
+		postgresType = Jsonb
 	default:
 		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("%w: %T", typeGenerationErrors.ErrUnsupportedKind, kind), kind)
 	}
