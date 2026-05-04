@@ -72,6 +72,39 @@ type Context struct {
 }
 
 func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
+	typeScriptType, err := c.getUnderlyingTypeScriptType(reflectType)
+	if err != nil {
+		return nil, err
+	}
+
+	reflectType = motmedelReflect.RemoveIndirection(reflectType)
+
+	useTypeAlias := reflectType.Name() != "" &&
+		(!isPrimitive(reflectType.Kind()) || isPrimitiveAlias(reflectType)) &&
+		!isTime(reflectType)
+
+	if useTypeAlias {
+		typeDeclaration, err := utils.MapGet(c.TypeDeclarations, reflectType)
+		if err != nil {
+			return nil, motmedelErrors.New(fmt.Errorf("map get: %w", err), c.TypeDeclarations, reflectType)
+		}
+
+		typeAliasDeclaration, err := utils.Convert[*type_declaration.TypeAliasDeclaration](typeDeclaration)
+		if err != nil {
+			return nil, motmedelErrors.New(fmt.Errorf("convert: %w", err), typeDeclaration)
+		}
+
+		return (&TypeAliasDeclaration{TypeAliasDeclaration: typeAliasDeclaration, c: c}).TypeReference(), nil
+	}
+
+	return typeScriptType, nil
+}
+
+// getUnderlyingTypeScriptType returns the structural TypeScript type for a Go
+// reflect.Type without wrapping it in a TypeReference even when the type is a
+// named alias. Used when emitting the right-hand side of an `export type X = …`
+// declaration, where wrapping would produce `export type X = X;`.
+func (c *Context) getUnderlyingTypeScriptType(reflectType reflect.Type) (Type, error) {
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
 	var typeScriptType Type
@@ -118,7 +151,10 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 					// for this instantiation.
 
 					argReflectType := field.Type
-					if fieldShape, ok := genericTypeInfo.FieldNameToShape[fieldName]; ok {
+					for _, fieldShape := range genericTypeInfo.FieldNameToShapes[fieldName] {
+						if fieldShape.Param != typeParameterName {
+							continue
+						}
 						switch fieldShape.Kind {
 						case shape.KindPointer:
 							argReflectType = motmedelReflect.RemoveIndirection(argReflectType)
@@ -131,6 +167,7 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 						case shape.KindDirect:
 							// use as-is
 						}
+						break
 					}
 
 					typeArgument, err := c.GetTypeScriptType(argReflectType)
@@ -208,24 +245,6 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 		typeScriptType = Any
 	default:
 		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("%w: %T", typeGenerationErrors.ErrUnsupportedKind, kind), kind)
-	}
-
-	useTypeAlias := reflectType.Name() != "" &&
-		(!isPrimitive(reflectType.Kind()) || isPrimitiveAlias(reflectType)) &&
-		!isTime(reflectType)
-
-	if useTypeAlias {
-		typeDeclaration, err := utils.MapGet(c.TypeDeclarations, reflectType)
-		if err != nil {
-			return nil, motmedelErrors.New(fmt.Errorf("map get: %w", err), c.TypeDeclarations, reflectType)
-		}
-
-		typeAliasDeclaration, err := utils.Convert[*type_declaration.TypeAliasDeclaration](typeDeclaration)
-		if err != nil {
-			return nil, motmedelErrors.New(fmt.Errorf("convert: %w", err), typeDeclaration)
-		}
-
-		return (&TypeAliasDeclaration{TypeAliasDeclaration: typeAliasDeclaration, c: c}).TypeReference(), nil
 	}
 
 	return typeScriptType, nil
@@ -358,7 +377,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		// Replace the field's type with the generic type parameter if the field uses the generic type parameter.
 
 		if genericTypeInfo != nil {
-			if fieldShape, ok := genericTypeInfo.FieldNameToShape[property.Identifier]; ok {
+			for _, fieldShape := range genericTypeInfo.FieldNameToShapes[property.Identifier] {
 				switch fieldShape.Kind {
 				case shape.KindDirect, shape.KindPointer:
 					typeScriptType = &TypeParameter{Identifier: fieldShape.Param}
@@ -425,12 +444,15 @@ func (a *TypeAliasDeclaration) QualifiedName() string {
 func (a *TypeAliasDeclaration) ToTypeScript() (string, error) {
 	params := renderTypeParams(a.TypeParameters)
 
-	typeScriptType, err := a.c.GetTypeScriptType(a.ReflectType)
+	typeScriptType, err := a.c.getUnderlyingTypeScriptType(a.ReflectType)
 	if err != nil {
-		return "", fmt.Errorf("get type script type: %w", err)
+		return "", fmt.Errorf("get underlying type script type: %w", err)
 	}
 
-	param, _ := typeScriptType.String()
+	param, err := typeScriptType.String()
+	if err != nil {
+		return "", fmt.Errorf("type script type string: %w", err)
+	}
 
 	if _, ok := typeScriptType.(*UnionType); !ok && a.c.GenerateNominalTypes {
 		return fmt.Sprintf(`    export type %s%s = %s & {

@@ -16,52 +16,62 @@ import (
 	"github.com/vphpersson/type_generation/pkg/types/shape"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
+	"github.com/Motmedel/utils_go/pkg/errors/types/empty_error"
+	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
 )
 
 var (
-	ErrNilPackage      = errors.New("nil package")
-	ErrNilScope        = errors.New("nil scope")
-	ErrNotTypeName     = errors.New("not a type name")
-	ErrNotNamed        = errors.New("not a named")
-	ErrEmptyTypeParams = errors.New("empty type parameters")
-	ErrNotStruct       = errors.New("not a struct")
-	ErrEmptyTypeName   = errors.New("empty type name")
-	ErrNotGeneric      = errors.New("not a generic type")
+	ErrNotTypeName = errors.New("not a type name")
+	ErrNotNamed    = errors.New("not a named")
+	ErrNotStruct   = errors.New("not a struct")
+	ErrNotGeneric  = errors.New("not a generic type")
 )
+
+type goTypesMatch struct {
+	param *goTypes.TypeParam
+	kind  shape.Kind
+}
 
 func detectShapeTypes(
 	t goTypes.Type,
 	paramSet map[*goTypes.TypeParam]struct{},
-) (*goTypes.TypeParam, shape.Kind, bool) {
+) []goTypesMatch {
 	switch tt := t.(type) {
 	case *goTypes.TypeParam:
 		if _, ok := paramSet[tt]; ok {
-			return tt, shape.KindDirect, true
+			return []goTypesMatch{{param: tt, kind: shape.KindDirect}}
 		}
-		return nil, 0, false
 	case *goTypes.Pointer:
-		if p, _, ok := detectShapeTypes(tt.Elem(), paramSet); ok {
-			return p, shape.KindPointer, true
+		var matches []goTypesMatch
+		for _, m := range detectShapeTypes(tt.Elem(), paramSet) {
+			matches = append(matches, goTypesMatch{param: m.param, kind: shape.KindPointer})
 		}
+		return matches
 	case *goTypes.Slice:
-		if p, _, ok := detectShapeTypes(tt.Elem(), paramSet); ok {
-			return p, shape.KindSlice, true
+		var matches []goTypesMatch
+		for _, m := range detectShapeTypes(tt.Elem(), paramSet) {
+			matches = append(matches, goTypesMatch{param: m.param, kind: shape.KindSlice})
 		}
+		return matches
 	case *goTypes.Array:
-		if p, _, ok := detectShapeTypes(tt.Elem(), paramSet); ok {
-			return p, shape.KindArray, true
+		var matches []goTypesMatch
+		for _, m := range detectShapeTypes(tt.Elem(), paramSet) {
+			matches = append(matches, goTypesMatch{param: m.param, kind: shape.KindArray})
 		}
+		return matches
 	case *goTypes.Map:
-		if p, _, ok := detectShapeTypes(tt.Elem(), paramSet); ok {
-			return p, shape.KindMapValue, true
+		var matches []goTypesMatch
+		for _, m := range detectShapeTypes(tt.Elem(), paramSet) {
+			matches = append(matches, goTypesMatch{param: m.param, kind: shape.KindMapValue})
 		}
-		if p, _, ok := detectShapeTypes(tt.Key(), paramSet); ok {
-			return p, shape.KindMapKey, true
+		for _, m := range detectShapeTypes(tt.Key(), paramSet) {
+			matches = append(matches, goTypesMatch{param: m.param, kind: shape.KindMapKey})
 		}
+		return matches
 	}
 
-	return nil, 0, false
+	return nil
 }
 
 func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_info.GenericTypeInfo, error) {
@@ -70,12 +80,12 @@ func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_
 		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("go importer default import: %w", err))
 	}
 	if pkg == nil {
-		return nil, motmedelErrors.NewWithTrace(ErrNilPackage)
+		return nil, motmedelErrors.NewWithTrace(nil_error.New("package"))
 	}
 
 	pkgScope := pkg.Scope()
 	if pkgScope == nil {
-		return nil, motmedelErrors.NewWithTrace(ErrNilScope)
+		return nil, motmedelErrors.NewWithTrace(nil_error.New("scope"))
 	}
 
 	object := pkgScope.Lookup(typeName)
@@ -100,7 +110,7 @@ func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_
 
 	typeParameters := namedType.TypeParams()
 	if typeParameters.Len() == 0 {
-		return nil, motmedelErrors.NewWithTrace(ErrEmptyTypeParams)
+		return nil, motmedelErrors.NewWithTrace(empty_error.New("type parameters"))
 	}
 
 	parameterNamesSet := map[*goTypes.TypeParam]struct{}{}
@@ -111,57 +121,71 @@ func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_
 		parameterNames[i] = typeParameter.Obj().Name()
 	}
 
-	fieldNameToShape := map[string]shape.Shape{}
+	fieldNameToShapes := map[string][]shape.Shape{}
 	paramToField := map[string]string{}
 	for i := range structType.NumFields() {
 		field := structType.Field(i)
-		typeParameter, kind, ok := detectShapeTypes(field.Type(), parameterNamesSet)
-		if !ok {
+		matches := detectShapeTypes(field.Type(), parameterNamesSet)
+		if len(matches) == 0 {
 			continue
 		}
 
 		name := field.Name()
-		fieldShape := shape.Shape{Param: typeParameter.Obj().Name(), Kind: kind}
-		fieldNameToShape[name] = fieldShape
-		if _, exists := paramToField[fieldShape.Param]; !exists {
-			paramToField[fieldShape.Param] = name
+		for _, m := range matches {
+			paramName := m.param.Obj().Name()
+			fieldNameToShapes[name] = append(fieldNameToShapes[name], shape.Shape{Param: paramName, Kind: m.kind})
+			if _, exists := paramToField[paramName]; !exists {
+				paramToField[paramName] = name
+			}
 		}
 	}
 
 	return &generic_type_info.GenericTypeInfo{
 		TypeParameterNames:           parameterNames,
-		FieldNameToShape:             fieldNameToShape,
+		FieldNameToShapes:            fieldNameToShapes,
 		TypeParameterNameToFieldName: paramToField,
 	}, nil
 }
 
-func detectShapeAst(e ast.Expr, paramSet map[string]struct{}) (string, shape.Kind, bool) {
+type astMatch struct {
+	param string
+	kind  shape.Kind
+}
+
+func detectShapeAst(e ast.Expr, paramSet map[string]struct{}) []astMatch {
 	switch ee := e.(type) {
 	case *ast.Ident:
 		if _, ok := paramSet[ee.Name]; ok {
-			return ee.Name, shape.KindDirect, true
+			return []astMatch{{param: ee.Name, kind: shape.KindDirect}}
 		}
 	case *ast.StarExpr:
-		if p, _, ok := detectShapeAst(ee.X, paramSet); ok {
-			return p, shape.KindPointer, true
+		var matches []astMatch
+		for _, m := range detectShapeAst(ee.X, paramSet) {
+			matches = append(matches, astMatch{param: m.param, kind: shape.KindPointer})
 		}
+		return matches
 	case *ast.ArrayType:
-		if p, _, ok := detectShapeAst(ee.Elt, paramSet); ok {
-			if ee.Len == nil {
-				return p, shape.KindSlice, true
-			}
-			return p, shape.KindArray, true
+		kind := shape.KindSlice
+		if ee.Len != nil {
+			kind = shape.KindArray
 		}
+		var matches []astMatch
+		for _, m := range detectShapeAst(ee.Elt, paramSet) {
+			matches = append(matches, astMatch{param: m.param, kind: kind})
+		}
+		return matches
 	case *ast.MapType:
-		if p, _, ok := detectShapeAst(ee.Value, paramSet); ok {
-			return p, shape.KindMapValue, true
+		var matches []astMatch
+		for _, m := range detectShapeAst(ee.Value, paramSet) {
+			matches = append(matches, astMatch{param: m.param, kind: shape.KindMapValue})
 		}
-		if p, _, ok := detectShapeAst(ee.Key, paramSet); ok {
-			return p, shape.KindMapKey, true
+		for _, m := range detectShapeAst(ee.Key, paramSet) {
+			matches = append(matches, astMatch{param: m.param, kind: shape.KindMapKey})
 		}
+		return matches
 	}
 
-	return "", 0, false
+	return nil
 }
 
 func discoverInWorkingDir(typeName string) (*generic_type_info.GenericTypeInfo, error) {
@@ -215,30 +239,34 @@ func discoverInWorkingDir(typeName string) (*generic_type_info.GenericTypeInfo, 
 						continue
 					}
 
-					fieldShapes := map[string]shape.Shape{}
+					fieldShapes := map[string][]shape.Shape{}
 					paramToField := map[string]string{}
 					for _, field := range structType.Fields.List {
 						if len(field.Names) == 0 {
 							continue
 						}
 
-						// Check if the struct field's type uses any of the type parameters.
-						param, kind, ok := detectShapeAst(field.Type, paramSet)
-						if !ok {
+						matches := detectShapeAst(field.Type, paramSet)
+						if len(matches) == 0 {
 							continue
 						}
 
 						for _, identifier := range field.Names {
-							fieldShapes[identifier.Name] = shape.Shape{Param: param, Kind: kind}
-							if _, exists := paramToField[param]; !exists {
-								paramToField[param] = identifier.Name
+							for _, m := range matches {
+								fieldShapes[identifier.Name] = append(
+									fieldShapes[identifier.Name],
+									shape.Shape{Param: m.param, Kind: m.kind},
+								)
+								if _, exists := paramToField[m.param]; !exists {
+									paramToField[m.param] = identifier.Name
+								}
 							}
 						}
 					}
 
 					return &generic_type_info.GenericTypeInfo{
 						TypeParameterNames:           paramNames,
-						FieldNameToShape:             fieldShapes,
+						FieldNameToShapes:            fieldShapes,
 						TypeParameterNameToFieldName: paramToField,
 					}, nil
 				}
@@ -287,52 +315,58 @@ func parseTypeArgs(name string) []string {
 	return args
 }
 
-func matchTypeArg(fieldType reflect.Type, typeArgs []string) (int, shape.Kind, bool) {
+type reflectMatch struct {
+	argIdx int
+	kind   shape.Kind
+}
+
+func matchTypeArg(fieldType reflect.Type, typeArgs []string) []reflectMatch {
 	ftn := fullTypeName(fieldType)
 	for i, arg := range typeArgs {
 		if ftn == arg {
-			return i, shape.KindDirect, true
+			return []reflectMatch{{argIdx: i, kind: shape.KindDirect}}
 		}
 	}
 
+	var matches []reflectMatch
 	switch fieldType.Kind() {
 	case reflect.Ptr:
 		ftn = fullTypeName(fieldType.Elem())
 		for i, arg := range typeArgs {
 			if ftn == arg {
-				return i, shape.KindPointer, true
+				matches = append(matches, reflectMatch{argIdx: i, kind: shape.KindPointer})
 			}
 		}
 	case reflect.Slice:
 		ftn = fullTypeName(fieldType.Elem())
 		for i, arg := range typeArgs {
 			if ftn == arg {
-				return i, shape.KindSlice, true
+				matches = append(matches, reflectMatch{argIdx: i, kind: shape.KindSlice})
 			}
 		}
 	case reflect.Array:
 		ftn = fullTypeName(fieldType.Elem())
 		for i, arg := range typeArgs {
 			if ftn == arg {
-				return i, shape.KindArray, true
+				matches = append(matches, reflectMatch{argIdx: i, kind: shape.KindArray})
 			}
 		}
 	case reflect.Map:
 		ftn = fullTypeName(fieldType.Elem())
 		for i, arg := range typeArgs {
 			if ftn == arg {
-				return i, shape.KindMapValue, true
+				matches = append(matches, reflectMatch{argIdx: i, kind: shape.KindMapValue})
 			}
 		}
 		ftn = fullTypeName(fieldType.Key())
 		for i, arg := range typeArgs {
 			if ftn == arg {
-				return i, shape.KindMapKey, true
+				matches = append(matches, reflectMatch{argIdx: i, kind: shape.KindMapKey})
 			}
 		}
 	}
 
-	return 0, 0, false
+	return matches
 }
 
 func discoverUsingReflection(structType reflect.Type) (*generic_type_info.GenericTypeInfo, error) {
@@ -346,26 +380,31 @@ func discoverUsingReflection(structType reflect.Type) (*generic_type_info.Generi
 		paramNames[i] = fmt.Sprintf("T%d", i)
 	}
 
-	fieldNameToShape := map[string]shape.Shape{}
+	fieldNameToShapes := map[string][]shape.Shape{}
 	paramToField := map[string]string{}
 
 	for i := range structType.NumField() {
 		field := structType.Field(i)
-		argIdx, kind, ok := matchTypeArg(field.Type, typeArgs)
-		if !ok {
+		matches := matchTypeArg(field.Type, typeArgs)
+		if len(matches) == 0 {
 			continue
 		}
 
-		paramName := paramNames[argIdx]
-		fieldNameToShape[field.Name] = shape.Shape{Param: paramName, Kind: kind}
-		if _, exists := paramToField[paramName]; !exists {
-			paramToField[paramName] = field.Name
+		for _, m := range matches {
+			paramName := paramNames[m.argIdx]
+			fieldNameToShapes[field.Name] = append(
+				fieldNameToShapes[field.Name],
+				shape.Shape{Param: paramName, Kind: m.kind},
+			)
+			if _, exists := paramToField[paramName]; !exists {
+				paramToField[paramName] = field.Name
+			}
 		}
 	}
 
 	return &generic_type_info.GenericTypeInfo{
 		TypeParameterNames:           paramNames,
-		FieldNameToShape:             fieldNameToShape,
+		FieldNameToShapes:            fieldNameToShapes,
 		TypeParameterNameToFieldName: paramToField,
 	}, nil
 }
@@ -378,7 +417,7 @@ func GetGenericTypeInfo(structType reflect.Type) (*generic_type_info.GenericType
 
 	typeName, isGenericType := motmedelReflect.GetTypeName(structType)
 	if typeName == "" {
-		return nil, motmedelErrors.NewWithTrace(ErrEmptyTypeName)
+		return nil, motmedelErrors.NewWithTrace(empty_error.New("type name"))
 	}
 	if !isGenericType {
 		return nil, motmedelErrors.NewWithTrace(ErrNotGeneric)

@@ -161,14 +161,15 @@ func (g *Context) populateProperties(
 					identifier = g.makeUniqueAnonymousIdentifier()
 				}
 
-				uniqueInterfaceName := g.makeUniqueIdentifier(identifier)
-				g.usedQualifiedNames[uniqueInterfaceName] = struct{}{}
+				identifier = g.makeUniqueIdentifier(identifier)
+				g.usedQualifiedNames[identifier] = struct{}{}
 
 				typeDeclaration := &type_declaration.TypeAliasDeclaration{
 					Identifier:  identifier,
 					ReflectType: directType,
 				}
 				g.TypeDeclarations[directType] = typeDeclaration
+				g.TypeDeclarationsInOrder = append(g.TypeDeclarationsInOrder, typeDeclaration)
 			}
 		}
 
@@ -251,7 +252,10 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 			}
 
 			argReflectType := field.Type
-			if fieldShape, ok := genericTypeInfo.FieldNameToShape[fieldName]; ok {
+			for _, fieldShape := range genericTypeInfo.FieldNameToShapes[fieldName] {
+				if fieldShape.Param != typeParameterName {
+					continue
+				}
 				switch fieldShape.Kind {
 				case shape.KindPointer:
 					argReflectType = motmedelReflect.RemoveIndirection(argReflectType)
@@ -264,6 +268,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 				case shape.KindDirect:
 					// use as-is
 				}
+				break
 			}
 
 			if directType := motmedelReflect.RemoveIndirection(argReflectType); directType.Kind() == reflect.Struct {

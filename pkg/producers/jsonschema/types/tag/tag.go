@@ -88,12 +88,14 @@ func New(tagString string) (*Tag, error) {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (minitems): %w", err))
 					}
 					tag.MinItems = &minItems
+					continue
 				case "maxitems":
 					maxItems, err := strconv.Atoi(value)
 					if err != nil {
 						return nil, motmedelErrors.NewWithTrace(fmt.Errorf("strconv atoi (maxitems): %w", err))
 					}
 					tag.MaxItems = &maxItems
+					continue
 				}
 			}
 			tag.OtherOptions = append(tag.OtherOptions, option)

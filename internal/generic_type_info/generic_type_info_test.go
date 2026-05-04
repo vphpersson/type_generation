@@ -1,7 +1,9 @@
 package generic_type_info
 
 import (
+	"go/parser"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/vphpersson/type_generation/pkg/types/shape"
@@ -67,10 +69,47 @@ type GenericMapValue[T any] struct {
 	Other   string
 }
 
+type GenericMapKeyValue[K comparable, V any] struct {
+	Mapping map[K]V
+}
+
 type GenericTwoParams[T any, U any] struct {
 	First  T
 	Second []U
 }
+
+type GenericArray[T any] struct {
+	Items [3]T
+}
+
+type GenericMapKeyOnly[K comparable] struct {
+	Mapping map[K]string
+}
+
+type GenericSamePairTwice[T any] struct {
+	A T
+	B T
+}
+
+type GenericMapTSameParam[T comparable] struct {
+	Mapping map[T]T
+}
+
+type GenericMixed[T any, U any, V comparable] struct {
+	Direct  T
+	Pointer *T
+	Slice   []U
+	Array   [2]U
+	Mapping map[V]U
+	Plain   string
+}
+
+// Distinct named types used as test type arguments so the reflection-based
+// discoverer (which can only compare full type names) does not confuse them
+// with concrete field types like `string` or `int`.
+type uniqueT struct{}
+type uniqueU struct{}
+type uniqueV string
 
 func TestDiscoverUsingReflection(t *testing.T) {
 	t.Run("direct", func(t *testing.T) {
@@ -85,15 +124,15 @@ func TestDiscoverUsingReflection(t *testing.T) {
 		if len(info.TypeParameterNames) != 1 {
 			t.Fatalf("expected 1 type param, got %d", len(info.TypeParameterNames))
 		}
-		s, ok := info.FieldNameToShape["Data"]
-		if !ok {
-			t.Fatal("expected Data in FieldNameToShape")
+		shapes, ok := info.FieldNameToShapes["Data"]
+		if !ok || len(shapes) != 1 {
+			t.Fatalf("expected one shape for Data, got %v", shapes)
 		}
-		if s.Kind != shape.KindDirect {
-			t.Errorf("expected KindDirect, got %v", s.Kind)
+		if shapes[0].Kind != shape.KindDirect {
+			t.Errorf("expected KindDirect, got %v", shapes[0].Kind)
 		}
-		if _, ok := info.FieldNameToShape["Other"]; ok {
-			t.Error("Other should not be in FieldNameToShape")
+		if _, ok := info.FieldNameToShapes["Other"]; ok {
+			t.Error("Other should not be in FieldNameToShapes")
 		}
 	})
 
@@ -106,12 +145,12 @@ func TestDiscoverUsingReflection(t *testing.T) {
 		if info == nil {
 			t.Fatal("expected non-nil info")
 		}
-		s, ok := info.FieldNameToShape["Data"]
-		if !ok {
-			t.Fatal("expected Data in FieldNameToShape")
+		shapes, ok := info.FieldNameToShapes["Data"]
+		if !ok || len(shapes) != 1 {
+			t.Fatalf("expected one shape for Data, got %v", shapes)
 		}
-		if s.Kind != shape.KindPointer {
-			t.Errorf("expected KindPointer, got %v", s.Kind)
+		if shapes[0].Kind != shape.KindPointer {
+			t.Errorf("expected KindPointer, got %v", shapes[0].Kind)
 		}
 	})
 
@@ -124,12 +163,12 @@ func TestDiscoverUsingReflection(t *testing.T) {
 		if info == nil {
 			t.Fatal("expected non-nil info")
 		}
-		s, ok := info.FieldNameToShape["Items"]
-		if !ok {
-			t.Fatal("expected Items in FieldNameToShape")
+		shapes, ok := info.FieldNameToShapes["Items"]
+		if !ok || len(shapes) != 1 {
+			t.Fatalf("expected one shape for Items, got %v", shapes)
 		}
-		if s.Kind != shape.KindSlice {
-			t.Errorf("expected KindSlice, got %v", s.Kind)
+		if shapes[0].Kind != shape.KindSlice {
+			t.Errorf("expected KindSlice, got %v", shapes[0].Kind)
 		}
 	})
 
@@ -142,12 +181,39 @@ func TestDiscoverUsingReflection(t *testing.T) {
 		if info == nil {
 			t.Fatal("expected non-nil info")
 		}
-		s, ok := info.FieldNameToShape["Mapping"]
-		if !ok {
-			t.Fatal("expected Mapping in FieldNameToShape")
+		shapes, ok := info.FieldNameToShapes["Mapping"]
+		if !ok || len(shapes) != 1 {
+			t.Fatalf("expected one shape for Mapping, got %v", shapes)
 		}
-		if s.Kind != shape.KindMapValue {
-			t.Errorf("expected KindMapValue, got %v", s.Kind)
+		if shapes[0].Kind != shape.KindMapValue {
+			t.Errorf("expected KindMapValue, got %v", shapes[0].Kind)
+		}
+	})
+
+	t.Run("map key and value both generic", func(t *testing.T) {
+		rt := reflect.TypeOf(GenericMapKeyValue[string, int]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info == nil {
+			t.Fatal("expected non-nil info")
+		}
+		shapes := info.FieldNameToShapes["Mapping"]
+		if len(shapes) != 2 {
+			t.Fatalf("expected two shapes for Mapping (key + value), got %v", shapes)
+		}
+		var sawKey, sawValue bool
+		for _, s := range shapes {
+			switch s.Kind {
+			case shape.KindMapKey:
+				sawKey = true
+			case shape.KindMapValue:
+				sawValue = true
+			}
+		}
+		if !sawKey || !sawValue {
+			t.Errorf("expected both KindMapKey and KindMapValue, got %v", shapes)
 		}
 	})
 
@@ -164,28 +230,28 @@ func TestDiscoverUsingReflection(t *testing.T) {
 			t.Fatalf("expected 2 type params, got %d", len(info.TypeParameterNames))
 		}
 
-		s1, ok := info.FieldNameToShape["First"]
-		if !ok {
-			t.Fatal("expected First in FieldNameToShape")
+		s1, ok := info.FieldNameToShapes["First"]
+		if !ok || len(s1) != 1 {
+			t.Fatalf("expected one shape for First, got %v", s1)
 		}
-		if s1.Kind != shape.KindDirect {
-			t.Errorf("expected KindDirect for First, got %v", s1.Kind)
+		if s1[0].Kind != shape.KindDirect {
+			t.Errorf("expected KindDirect for First, got %v", s1[0].Kind)
 		}
 
-		s2, ok := info.FieldNameToShape["Second"]
-		if !ok {
-			t.Fatal("expected Second in FieldNameToShape")
+		s2, ok := info.FieldNameToShapes["Second"]
+		if !ok || len(s2) != 1 {
+			t.Fatalf("expected one shape for Second, got %v", s2)
 		}
-		if s2.Kind != shape.KindSlice {
-			t.Errorf("expected KindSlice for Second, got %v", s2.Kind)
+		if s2[0].Kind != shape.KindSlice {
+			t.Errorf("expected KindSlice for Second, got %v", s2[0].Kind)
 		}
 
 		// Params should map to different fields
-		if info.TypeParameterNameToFieldName[s1.Param] != "First" {
-			t.Errorf("expected param %s to map to First", s1.Param)
+		if info.TypeParameterNameToFieldName[s1[0].Param] != "First" {
+			t.Errorf("expected param %s to map to First", s1[0].Param)
 		}
-		if info.TypeParameterNameToFieldName[s2.Param] != "Second" {
-			t.Errorf("expected param %s to map to Second", s2.Param)
+		if info.TypeParameterNameToFieldName[s2[0].Param] != "Second" {
+			t.Errorf("expected param %s to map to Second", s2[0].Param)
 		}
 	})
 
@@ -199,4 +265,337 @@ func TestDiscoverUsingReflection(t *testing.T) {
 			t.Error("expected nil info for non-generic type")
 		}
 	})
+
+	t.Run("array", func(t *testing.T) {
+		rt := reflect.TypeOf(GenericArray[int]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shapes := info.FieldNameToShapes["Items"]
+		if len(shapes) != 1 {
+			t.Fatalf("expected one shape for Items, got %v", shapes)
+		}
+		if shapes[0].Kind != shape.KindArray {
+			t.Errorf("expected KindArray, got %v", shapes[0].Kind)
+		}
+	})
+
+	t.Run("map key only generic", func(t *testing.T) {
+		// Use a unique named type as K so it doesn't accidentally collide
+		// with the concrete `string` value type in the reflection comparison.
+		rt := reflect.TypeOf(GenericMapKeyOnly[uniqueV]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shapes := info.FieldNameToShapes["Mapping"]
+		if len(shapes) != 1 {
+			t.Fatalf("expected one shape for Mapping, got %v", shapes)
+		}
+		if shapes[0].Kind != shape.KindMapKey {
+			t.Errorf("expected KindMapKey, got %v", shapes[0].Kind)
+		}
+	})
+
+	t.Run("same param appears in two fields", func(t *testing.T) {
+		rt := reflect.TypeOf(GenericSamePairTwice[int]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, name := range []string{"A", "B"} {
+			shapes := info.FieldNameToShapes[name]
+			if len(shapes) != 1 {
+				t.Errorf("field %s: expected one shape, got %v", name, shapes)
+				continue
+			}
+			if shapes[0].Kind != shape.KindDirect {
+				t.Errorf("field %s: expected KindDirect, got %v", name, shapes[0].Kind)
+			}
+		}
+
+		// First-seen field wins for the param→field index.
+		if got := info.TypeParameterNameToFieldName["T0"]; got != "A" {
+			t.Errorf("expected param T0 → A (first-seen), got %q", got)
+		}
+	})
+
+	t.Run("same param as both map key and value", func(t *testing.T) {
+		rt := reflect.TypeOf(GenericMapTSameParam[string]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		shapes := info.FieldNameToShapes["Mapping"]
+		if len(shapes) != 2 {
+			t.Fatalf("expected two shapes for Mapping (key + value of same param), got %v", shapes)
+		}
+		var sawKey, sawValue bool
+		for _, s := range shapes {
+			if s.Param != "T0" {
+				t.Errorf("expected Param T0, got %q", s.Param)
+			}
+			switch s.Kind {
+			case shape.KindMapKey:
+				sawKey = true
+			case shape.KindMapValue:
+				sawValue = true
+			}
+		}
+		if !sawKey || !sawValue {
+			t.Errorf("expected both KindMapKey and KindMapValue for same param, got %v", shapes)
+		}
+	})
+
+	t.Run("mixed shapes across multiple fields", func(t *testing.T) {
+		// Use unique named types as type args so the reflection discoverer
+		// can't confuse them with the concrete `string` Plain field.
+		rt := reflect.TypeOf(GenericMixed[uniqueT, uniqueU, uniqueV]{})
+		info, err := discoverUsingReflection(rt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(info.TypeParameterNames) != 3 {
+			t.Fatalf("expected 3 type params, got %d", len(info.TypeParameterNames))
+		}
+
+		expectations := map[string]shape.Kind{
+			"Direct":  shape.KindDirect,
+			"Pointer": shape.KindPointer,
+			"Slice":   shape.KindSlice,
+			"Array":   shape.KindArray,
+		}
+		for fieldName, wantKind := range expectations {
+			shapes := info.FieldNameToShapes[fieldName]
+			if len(shapes) != 1 {
+				t.Errorf("field %s: expected one shape, got %v", fieldName, shapes)
+				continue
+			}
+			if shapes[0].Kind != wantKind {
+				t.Errorf("field %s: expected %v, got %v", fieldName, wantKind, shapes[0].Kind)
+			}
+		}
+
+		mappingShapes := info.FieldNameToShapes["Mapping"]
+		if len(mappingShapes) != 2 {
+			t.Fatalf("expected two shapes for Mapping, got %v", mappingShapes)
+		}
+
+		if _, ok := info.FieldNameToShapes["Plain"]; ok {
+			t.Error("Plain (no type param) should not be in FieldNameToShapes")
+		}
+
+		// Every type param should have a representative field.
+		for _, paramName := range info.TypeParameterNames {
+			if info.TypeParameterNameToFieldName[paramName] == "" {
+				t.Errorf("param %s missing from TypeParameterNameToFieldName", paramName)
+			}
+		}
+	})
+}
+
+func TestDetectShapeAst(t *testing.T) {
+	type want struct {
+		param string
+		kind  shape.Kind
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		paramSet map[string]struct{}
+		want     []want
+	}{
+		{
+			name:     "direct param",
+			expr:     "T",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     []want{{"T", shape.KindDirect}},
+		},
+		{
+			name:     "non-param identifier",
+			expr:     "string",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     nil,
+		},
+		{
+			name:     "pointer to param",
+			expr:     "*T",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     []want{{"T", shape.KindPointer}},
+		},
+		{
+			name:     "slice of param",
+			expr:     "[]T",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     []want{{"T", shape.KindSlice}},
+		},
+		{
+			name:     "fixed array of param",
+			expr:     "[3]T",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     []want{{"T", shape.KindArray}},
+		},
+		{
+			name:     "map with param value only",
+			expr:     "map[string]V",
+			paramSet: map[string]struct{}{"V": {}},
+			want:     []want{{"V", shape.KindMapValue}},
+		},
+		{
+			name:     "map with param key only",
+			expr:     "map[K]string",
+			paramSet: map[string]struct{}{"K": {}},
+			want:     []want{{"K", shape.KindMapKey}},
+		},
+		{
+			name:     "map with both params generic",
+			expr:     "map[K]V",
+			paramSet: map[string]struct{}{"K": {}, "V": {}},
+			want:     []want{{"V", shape.KindMapValue}, {"K", shape.KindMapKey}},
+		},
+		{
+			name:     "map with same param as key and value",
+			expr:     "map[T]T",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     []want{{"T", shape.KindMapValue}, {"T", shape.KindMapKey}},
+		},
+		{
+			name:     "map with no generic types",
+			expr:     "map[string]int",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     nil,
+		},
+		{
+			name:     "selector expression (qualified type) does not match",
+			expr:     "pkg.X",
+			paramSet: map[string]struct{}{"T": {}},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := parser.ParseExpr(tt.expr)
+			if err != nil {
+				t.Fatalf("parse expr %q: %v", tt.expr, err)
+			}
+
+			got := detectShapeAst(expr, tt.paramSet)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d matches, want %d: got=%v want=%v", len(got), len(tt.want), got, tt.want)
+			}
+
+			gotPairs := make([]want, len(got))
+			for i, m := range got {
+				gotPairs[i] = want{m.param, m.kind}
+			}
+			sort.Slice(gotPairs, func(i, j int) bool {
+				if gotPairs[i].param != gotPairs[j].param {
+					return gotPairs[i].param < gotPairs[j].param
+				}
+				return gotPairs[i].kind < gotPairs[j].kind
+			})
+			wantSorted := append([]want(nil), tt.want...)
+			sort.Slice(wantSorted, func(i, j int) bool {
+				if wantSorted[i].param != wantSorted[j].param {
+					return wantSorted[i].param < wantSorted[j].param
+				}
+				return wantSorted[i].kind < wantSorted[j].kind
+			})
+
+			for i := range gotPairs {
+				if gotPairs[i] != wantSorted[i] {
+					t.Errorf("match %d: got %+v, want %+v", i, gotPairs[i], wantSorted[i])
+				}
+			}
+		})
+	}
+}
+
+func TestMatchTypeArg(t *testing.T) {
+	type want struct {
+		argIdx int
+		kind   shape.Kind
+	}
+
+	tests := []struct {
+		name     string
+		field    reflect.Type
+		typeArgs []string
+		want     []want
+	}{
+		{
+			name:     "direct match",
+			field:    reflect.TypeOf(0),
+			typeArgs: []string{"int"},
+			want:     []want{{0, shape.KindDirect}},
+		},
+		{
+			name:     "pointer to arg",
+			field:    reflect.TypeOf((*int)(nil)),
+			typeArgs: []string{"int"},
+			want:     []want{{0, shape.KindPointer}},
+		},
+		{
+			name:     "slice of arg",
+			field:    reflect.TypeOf([]string{}),
+			typeArgs: []string{"string"},
+			want:     []want{{0, shape.KindSlice}},
+		},
+		{
+			name:     "fixed array of arg",
+			field:    reflect.TypeOf([3]int{}),
+			typeArgs: []string{"int"},
+			want:     []want{{0, shape.KindArray}},
+		},
+		{
+			name:     "map value only",
+			field:    reflect.TypeOf(map[string]int{}),
+			typeArgs: []string{"int"},
+			want:     []want{{0, shape.KindMapValue}},
+		},
+		{
+			name:     "map key only",
+			field:    reflect.TypeOf(map[string]int{}),
+			typeArgs: []string{"string"},
+			want:     []want{{0, shape.KindMapKey}},
+		},
+		{
+			name:     "map both key and value match different args",
+			field:    reflect.TypeOf(map[string]int{}),
+			typeArgs: []string{"string", "int"},
+			want:     []want{{1, shape.KindMapValue}, {0, shape.KindMapKey}},
+		},
+		{
+			name:     "map both key and value match same arg",
+			field:    reflect.TypeOf(map[int]int{}),
+			typeArgs: []string{"int"},
+			want:     []want{{0, shape.KindMapValue}, {0, shape.KindMapKey}},
+		},
+		{
+			name:     "no match",
+			field:    reflect.TypeOf(0.0),
+			typeArgs: []string{"int", "string"},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchTypeArg(tt.field, tt.typeArgs)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d matches, want %d: got=%v want=%v", len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				gw := want{got[i].argIdx, got[i].kind}
+				if gw != tt.want[i] {
+					t.Errorf("match %d: got %+v, want %+v", i, gw, tt.want[i])
+				}
+			}
+		})
+	}
 }

@@ -4,6 +4,6 @@ import "github.com/vphpersson/type_generation/pkg/types/shape"
 
 type GenericTypeInfo struct {
 	TypeParameterNames           []string
-	FieldNameToShape             map[string]shape.Shape
+	FieldNameToShapes            map[string][]shape.Shape
 	TypeParameterNameToFieldName map[string]string
 }
