@@ -262,6 +262,26 @@ func TestRenderPrimitiveTypeAlias(t *testing.T) {
 	}
 }
 
+type nestedInner struct {
+	Value string `json:"value"`
+}
+
+type nestedOuter struct {
+	Inner nestedInner `json:"inner"`
+}
+
+func TestRenderNamedStructFieldDoesNotPanic(t *testing.T) {
+	// Regression: GetTypeScriptType used to apply the type-alias path to any
+	// named type, including struct types whose TypeDeclaration is an
+	// *InterfaceDeclaration. That produced a "convert: conversion not ok:
+	// *type_declaration.InterfaceDeclaration" error during rendering.
+	out := renderTS(t, reflect.TypeOf(nestedOuter{}))
+
+	if !strings.Contains(out, "inner: NestedInner") {
+		t.Errorf("expected inner field to reference NestedInner, got:\n%s", out)
+	}
+}
+
 func TestGenericMapKeyOnly_DataLayer(t *testing.T) {
 	// Sanity check that map[K]string still works (only one shape, KindMapKey)
 	// and was not broken by changing the underlying representation to a slice.

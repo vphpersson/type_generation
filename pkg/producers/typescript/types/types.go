@@ -79,7 +79,13 @@ func (c *Context) GetTypeScriptType(reflectType reflect.Type) (Type, error) {
 
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
+	// Struct types are already returned as a TypeReference by
+	// getUnderlyingTypeScriptType (their TypeDeclaration is an
+	// *InterfaceDeclaration, not a *TypeAliasDeclaration), so the lookup below
+	// would fail. The alias path is only for named non-struct types like
+	// `type Score int` or `type Names []string`.
 	useTypeAlias := reflectType.Name() != "" &&
+		reflectType.Kind() != reflect.Struct &&
 		(!isPrimitive(reflectType.Kind()) || isPrimitiveAlias(reflectType)) &&
 		!isTime(reflectType)
 
