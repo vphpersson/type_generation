@@ -291,6 +291,64 @@ func keysOf(m map[string]any) []string {
 	return out
 }
 
+type WithPointers struct {
+	OptionalString *string       `json:"optional_string,omitempty"`
+	OptionalInt    *int          `json:"optional_int,omitempty"`
+	OptionalNested *SimpleStruct `json:"optional_nested,omitempty"`
+}
+
+func TestPointerFieldsAreNullable(t *testing.T) {
+	schema := renderRootSchema(t, reflect.TypeOf(WithPointers{}))
+	def := resolveDef(t, schema, "WithPointers")
+	props := def["properties"].(map[string]any)
+
+	stringProp := props["optional_string"].(map[string]any)
+	stringTypes, ok := stringProp["type"].([]any)
+	if !ok {
+		t.Fatalf("optional_string.type should be a slice, got %T (%v)", stringProp["type"], stringProp["type"])
+	}
+	if !containsAny(stringTypes, "string") || !containsAny(stringTypes, "null") {
+		t.Errorf("optional_string.type = %v, want [string null]", stringTypes)
+	}
+
+	intProp := props["optional_int"].(map[string]any)
+	intTypes, ok := intProp["type"].([]any)
+	if !ok {
+		t.Fatalf("optional_int.type should be a slice, got %T (%v)", intProp["type"], intProp["type"])
+	}
+	if !containsAny(intTypes, "integer") || !containsAny(intTypes, "null") {
+		t.Errorf("optional_int.type = %v, want [integer null]", intTypes)
+	}
+
+	nestedProp := props["optional_nested"].(map[string]any)
+	anyOf, ok := nestedProp["anyOf"].([]any)
+	if !ok {
+		t.Fatalf("optional_nested should use anyOf for $ref + null, got %v", nestedProp)
+	}
+	sawRef, sawNull := false, false
+	for _, alt := range anyOf {
+		altMap, _ := alt.(map[string]any)
+		if _, ok := altMap["$ref"]; ok {
+			sawRef = true
+		}
+		if altMap["type"] == "null" {
+			sawNull = true
+		}
+	}
+	if !sawRef || !sawNull {
+		t.Errorf("optional_nested.anyOf should contain both $ref and {type:null}, got %v", anyOf)
+	}
+}
+
+func containsAny(haystack []any, needle string) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
 type WithBytes struct {
 	Blob []byte `json:"blob"`
 }

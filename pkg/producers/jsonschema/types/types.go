@@ -82,6 +82,48 @@ func (c *Context) GetJSONSchemaType(reflectType reflect.Type) (map[string]any, e
 	}
 }
 
+// makeNullable extends the schema so that JSON null is also a valid value.
+// For schemas with a plain "type" string, it widens to a [type, "null"] tuple.
+// For schemas using "$ref" (or any other shape), it wraps in anyOf with a null
+// alternative so the reference is preserved.
+func makeNullable(propertySchema map[string]any) map[string]any {
+	if _, hasRef := propertySchema["$ref"]; hasRef {
+		return map[string]any{
+			"anyOf": []any{
+				propertySchema,
+				map[string]any{"type": "null"},
+			},
+		}
+	}
+
+	switch t := propertySchema["type"].(type) {
+	case string:
+		if t != "null" {
+			propertySchema["type"] = []any{t, "null"}
+		}
+	case []any:
+		hasNull := false
+		for _, x := range t {
+			if x == "null" {
+				hasNull = true
+				break
+			}
+		}
+		if !hasNull {
+			propertySchema["type"] = append(t, "null")
+		}
+	default:
+		return map[string]any{
+			"anyOf": []any{
+				propertySchema,
+				map[string]any{"type": "null"},
+			},
+		}
+	}
+
+	return propertySchema
+}
+
 // buildInterfaceSchema builds the object schema for a given interface declaration
 func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.InterfaceDeclaration) (map[string]any, error) {
 	schemaMap := map[string]any{
@@ -142,6 +184,8 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 		}
 
 		fieldType := field.Type
+		isNullable := fieldType.Kind() == reflect.Pointer
+
 		propertySchema, err := c.GetJSONSchemaType(fieldType)
 		if err != nil {
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type: %w", err), fieldType)
@@ -188,6 +232,10 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 					}
 				}
 			}
+		}
+
+		if isNullable {
+			propertySchema = makeNullable(propertySchema)
 		}
 
 		properties[identifier] = propertySchema
