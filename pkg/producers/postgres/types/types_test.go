@@ -10,12 +10,12 @@ import (
 )
 
 type pgPrimitives struct {
-	S  string  `json:"s"`
-	I  int     `json:"i"`
-	I8 int8    `json:"i8"`
-	I64 int64  `json:"i64"`
-	F  float64 `json:"f"`
-	B  bool    `json:"b"`
+	S   string  `json:"s"`
+	I   int     `json:"i"`
+	I8  int8    `json:"i8"`
+	I64 int64   `json:"i64"`
+	F   float64 `json:"f"`
+	B   bool    `json:"b"`
 }
 
 type pgWithTime struct {
@@ -124,6 +124,48 @@ func TestStructSliceCreatesAssociativeTable(t *testing.T) {
 	createCount := strings.Count(out, "CREATE TABLE ")
 	if createCount < 3 {
 		t.Errorf("expected at least 3 CREATE TABLE statements (outer + inner + assoc), got %d:\n%s", createCount, out)
+	}
+}
+
+type pgWithSkippedReference struct {
+	Name   string   `json:"name"`
+	Hidden *pgInner `json:"hidden,omitzero" postgres:"-"`
+}
+
+// A struct referenced only through a `postgres:"-"` field must not be
+// materialized as a table, and the field itself must not become a column.
+func TestSkippedStructFieldOmitsTableAndColumn(t *testing.T) {
+	out := renderPG(t, reflect.TypeOf(pgWithSkippedReference{}))
+
+	if !strings.Contains(out, "CREATE TABLE pg_with_skipped_reference") {
+		t.Errorf("expected the outer table, got:\n%s", out)
+	}
+	if strings.Contains(out, "pg_inner") {
+		t.Errorf("expected no table/reference for a struct reached only via a skipped field, got:\n%s", out)
+	}
+	if strings.Contains(out, "Hidden") {
+		t.Errorf("expected no column for the skipped field, got:\n%s", out)
+	}
+	if got := strings.Count(out, "CREATE TABLE "); got != 1 {
+		t.Errorf("expected exactly 1 CREATE TABLE (the outer struct), got %d:\n%s", got, out)
+	}
+}
+
+type pgWithSkippedStructSlice struct {
+	Name   string    `json:"name"`
+	Hidden []pgInner `json:"hidden,omitzero" postgres:"-"`
+}
+
+// A skipped struct slice must not emit an associative (join) table nor a table
+// for its element type.
+func TestSkippedStructSliceOmitsAssociativeTable(t *testing.T) {
+	out := renderPG(t, reflect.TypeOf(pgWithSkippedStructSlice{}))
+
+	if strings.Contains(out, "pg_inner") {
+		t.Errorf("expected no element or associative table for a skipped struct slice, got:\n%s", out)
+	}
+	if got := strings.Count(out, "CREATE TABLE "); got != 1 {
+		t.Errorf("expected exactly 1 CREATE TABLE (the outer struct), got %d:\n%s", got, out)
 	}
 }
 

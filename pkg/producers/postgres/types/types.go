@@ -142,6 +142,57 @@ func isTime(t reflect.Type) bool {
 
 type Context struct {
 	*typeGenerationContext.Context
+
+	// Roots holds the top-level struct types registered through Add. Render
+	// emits a table for a struct only if it is a root or is reachable from one
+	// through a non-skipped field, so a type referenced solely by a
+	// `postgres:"-"` field never produces an orphan table.
+	Roots []reflect.Type
+}
+
+// Add registers the given values like the embedded context does and, in
+// addition, records the resulting top-level struct types as roots so Render can
+// distinguish persisted types from those reachable only via skipped fields.
+func (c *Context) Add(values ...any) error {
+	for _, value := range values {
+		if rootType := rootStructType(value); rootType != nil {
+			c.Roots = append(c.Roots, rootType)
+		}
+	}
+
+	return c.Context.Add(values...)
+}
+
+// rootStructType mirrors the normalization the embedded context applies when
+// deciding which values become top-level type declarations: indirection is
+// removed and map/slice/array values are reduced to their element type. It
+// returns nil for anything that does not resolve to a struct (which the
+// embedded context likewise ignores).
+func rootStructType(value any) reflect.Type {
+	var reflectType reflect.Type
+	switch v := value.(type) {
+	case reflect.Type:
+		reflectType = v
+	case reflect.Value:
+		reflectType = v.Type()
+	default:
+		reflectType = reflect.TypeOf(v)
+	}
+	if reflectType == nil {
+		return nil
+	}
+
+	reflectType = motmedelReflect.RemoveIndirection(reflectType)
+	switch reflectType.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		reflectType = motmedelReflect.RemoveIndirection(reflectType.Elem())
+	}
+
+	if reflectType.Kind() != reflect.Struct {
+		return nil
+	}
+
+	return reflectType
 }
 
 func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
@@ -210,12 +261,104 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 	return postgresType, nil
 }
 
+// referencedStructTypes returns the struct types a field references for table
+// purposes: the struct itself for a (pointer to) struct field, or the element
+// struct for a slice/array of structs. time.Time and non-struct types yield
+// nothing. This mirrors the reference shapes String emits (a reference column
+// or an associative table).
+func referencedStructTypes(fieldType reflect.Type) []reflect.Type {
+	directType := motmedelReflect.RemoveIndirection(fieldType)
+	switch directType.Kind() {
+	case reflect.Struct:
+		if isTime(directType) {
+			return nil
+		}
+		return []reflect.Type{directType}
+	case reflect.Slice, reflect.Array:
+		elemType := motmedelReflect.RemoveIndirection(directType.Elem())
+		if elemType.Kind() == reflect.Struct && !isTime(elemType) {
+			return []reflect.Type{elemType}
+		}
+	}
+
+	return nil
+}
+
+// persistedTableTypes computes the set of struct types that should be emitted as
+// tables: the roots, plus every struct reachable from a root through a
+// non-skipped field. A struct reachable only via `postgres:"-"` fields is
+// excluded — it is still registered (other producers, e.g. TypeScript, need it)
+// but must not be materialized as a table here.
+func (c *Context) persistedTableTypes() map[reflect.Type]bool {
+	persisted := map[reflect.Type]bool{}
+	var worklist []reflect.Type
+
+	enqueue := func(reflectType reflect.Type) {
+		reflectType = motmedelReflect.RemoveIndirection(reflectType)
+		if reflectType.Kind() != reflect.Struct || isTime(reflectType) {
+			return
+		}
+		if persisted[reflectType] {
+			return
+		}
+		persisted[reflectType] = true
+		worklist = append(worklist, reflectType)
+	}
+
+	for _, root := range c.Roots {
+		enqueue(root)
+	}
+
+	for len(worklist) > 0 {
+		reflectType := worklist[len(worklist)-1]
+		worklist = worklist[:len(worklist)-1]
+
+		typeDeclaration, ok := c.TypeDeclarations[reflectType]
+		if !ok {
+			continue
+		}
+		interfaceDeclaration, ok := typeDeclaration.(*type_declaration.InterfaceDeclaration)
+		if !ok {
+			continue
+		}
+
+		for _, property := range interfaceDeclaration.Properties {
+			if property == nil || property.Field == nil {
+				continue
+			}
+
+			if postgresTag := tag.New(property.Field.Tag.Get("postgres")); postgresTag != nil && postgresTag.Skip {
+				continue
+			}
+
+			for _, referencedType := range referencedStructTypes(property.Field.Type) {
+				enqueue(referencedType)
+			}
+		}
+	}
+
+	return persisted
+}
+
 func (c *Context) Render() (string, error) {
+	persisted := c.persistedTableTypes()
+
+	declarationToType := map[type_declaration.TypeDeclaration]reflect.Type{}
+	for reflectType, typeDeclaration := range c.TypeDeclarations {
+		declarationToType[typeDeclaration] = reflectType
+	}
+
 	var interfaceDeclarations []*InterfaceDeclaration
 
 	for _, typeDeclaration := range c.TypeDeclarationsInOrder {
 		switch v := any(typeDeclaration).(type) {
 		case *type_declaration.InterfaceDeclaration:
+			// Omit struct types reachable only through skipped fields; they are
+			// registered for other producers but are not persisted tables.
+			if reflectType, ok := declarationToType[typeDeclaration]; ok && !persisted[reflectType] {
+				continue
+			}
+
 			interfaceDeclarations = append(
 				interfaceDeclarations,
 				&InterfaceDeclaration{InterfaceDeclaration: v, c: c},
@@ -268,6 +411,15 @@ func (t *InterfaceDeclaration) String() (string, error) {
 			return "", motmedelErrors.NewWithTrace(nil_error.New("property field"), property)
 		}
 
+		// A field tagged `postgres:"-"` is ignored entirely: it produces neither
+		// a column nor an associative/reference table. This must be checked
+		// before the field type is resolved so that skipping also suppresses the
+		// associative table a struct slice would otherwise emit below.
+		postgresTag := tag.New(field.Tag.Get("postgres"))
+		if postgresTag != nil && postgresTag.Skip {
+			continue
+		}
+
 		fieldType := field.Type
 		postgresType, err := t.c.GetPostgresType(fieldType)
 		if err != nil {
@@ -297,12 +449,7 @@ func (t *InterfaceDeclaration) String() (string, error) {
 		var attributes []string
 		optional := property.Optional
 
-		postgresTag := tag.New(field.Tag.Get("postgres"))
 		if postgresTag != nil {
-			if postgresTag.Skip {
-				continue
-			}
-
 			if name := postgresTag.Name; name != "" {
 				identifier = name
 			}
