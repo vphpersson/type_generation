@@ -295,3 +295,20 @@ func TestGenericMapKeyOnly_DataLayer(t *testing.T) {
 		t.Errorf("expected KindMapKey, got %v", shapes[0].Kind)
 	}
 }
+
+type withBinary struct {
+	Content   []byte   `json:"content"`
+	Documents [][]byte `json:"documents"`
+}
+
+func TestRenderByteSlice(t *testing.T) {
+	// []byte carries binary data and should render as Uint8Array, not number[].
+	out := renderTS(t, reflect.TypeOf(withBinary{}))
+
+	if !strings.Contains(out, "content: Uint8Array") {
+		t.Errorf("expected content to be Uint8Array, got:\n%s", out)
+	}
+	if !strings.Contains(out, "documents: Uint8Array[]") {
+		t.Errorf("expected documents to be Uint8Array[], got:\n%s", out)
+	}
+}

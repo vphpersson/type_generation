@@ -49,11 +49,12 @@ func (p *TypeParameter) String() (string, error) { return p.Identifier, nil }
 type BasicType string
 
 const (
-	Boolean = BasicType("boolean")
-	Number  = BasicType("number")
-	String  = BasicType("string")
-	Null    = BasicType("null")
-	Any     = BasicType("any")
+	Boolean    = BasicType("boolean")
+	Number     = BasicType("number")
+	String     = BasicType("string")
+	Null       = BasicType("null")
+	Any        = BasicType("any")
+	Uint8Array = BasicType("Uint8Array")
 )
 
 func (b BasicType) String() (string, error) { return string(b), nil }

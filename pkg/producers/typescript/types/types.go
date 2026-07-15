@@ -241,11 +241,16 @@ func (c *Context) getUnderlyingTypeScriptType(reflectType reflect.Type) (Type, e
 
 		typeScriptType = &MapType{IndexType: indexType, ValueType: valueType}
 	case reflect.Slice, reflect.Array:
-		itemsType, err := c.GetTypeScriptType(reflectType.Elem())
-		if err != nil {
-			return nil, err
+		// []byte carries binary data, not an array of numbers.
+		if reflectType.Elem().Kind() == reflect.Uint8 {
+			typeScriptType = Uint8Array
+		} else {
+			itemsType, err := c.GetTypeScriptType(reflectType.Elem())
+			if err != nil {
+				return nil, err
+			}
+			typeScriptType = &ArrayType{ItemsType: itemsType}
 		}
-		typeScriptType = &ArrayType{ItemsType: itemsType}
 
 	case reflect.Interface:
 		typeScriptType = Any
