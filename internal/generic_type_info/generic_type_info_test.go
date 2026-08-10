@@ -1,15 +1,22 @@
 package generic_type_info
 
 import (
+	"errors"
+	"go/ast"
 	"go/parser"
+	"go/token"
+	goTypes "go/types"
 	"reflect"
 	"sort"
 	"testing"
+	"unique"
 
 	"github.com/vphpersson/type_generation/pkg/types/shape"
 )
 
 func TestParseTypeArgs(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		input    string
@@ -26,6 +33,8 @@ func TestParseTypeArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := parseTypeArgs(tt.input)
 			if tt.expected == nil {
 				if result != nil {
@@ -112,8 +121,12 @@ type uniqueU struct{}
 type uniqueV string
 
 func TestDiscoverUsingReflection(t *testing.T) {
+	t.Parallel()
+
 	t.Run("direct", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericDirect[int]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericDirect[int]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -137,7 +150,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("pointer", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericPointer[Inner]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericPointer[Inner]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -155,7 +170,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("slice", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericSlice[string]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericSlice[string]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -173,7 +190,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("map value", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericMapValue[int]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericMapValue[int]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -191,7 +210,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("map key and value both generic", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericMapKeyValue[string, int]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericMapKeyValue[string, int]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -205,6 +226,7 @@ func TestDiscoverUsingReflection(t *testing.T) {
 		}
 		var sawKey, sawValue bool
 		for _, s := range shapes {
+			//exhaustive:ignore
 			switch s.Kind {
 			case shape.KindMapKey:
 				sawKey = true
@@ -218,7 +240,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("two params", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericTwoParams[int, Inner]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericTwoParams[int, Inner]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -256,7 +280,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("non-generic returns nil", func(t *testing.T) {
-		rt := reflect.TypeOf(Inner{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[Inner]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -267,7 +293,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("array", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericArray[int]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericArray[int]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -282,9 +310,11 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("map key only generic", func(t *testing.T) {
+		t.Parallel()
+
 		// Use a unique named type as K so it doesn't accidentally collide
 		// with the concrete `string` value type in the reflection comparison.
-		rt := reflect.TypeOf(GenericMapKeyOnly[uniqueV]{})
+		rt := reflect.TypeFor[GenericMapKeyOnly[uniqueV]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -299,7 +329,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("same param appears in two fields", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericSamePairTwice[int]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericSamePairTwice[int]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -323,7 +355,9 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("same param as both map key and value", func(t *testing.T) {
-		rt := reflect.TypeOf(GenericMapTSameParam[string]{})
+		t.Parallel()
+
+		rt := reflect.TypeFor[GenericMapTSameParam[string]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -338,6 +372,7 @@ func TestDiscoverUsingReflection(t *testing.T) {
 			if s.Param != "T0" {
 				t.Errorf("expected Param T0, got %q", s.Param)
 			}
+			//exhaustive:ignore
 			switch s.Kind {
 			case shape.KindMapKey:
 				sawKey = true
@@ -351,9 +386,11 @@ func TestDiscoverUsingReflection(t *testing.T) {
 	})
 
 	t.Run("mixed shapes across multiple fields", func(t *testing.T) {
+		t.Parallel()
+
 		// Use unique named types as type args so the reflection discoverer
 		// can't confuse them with the concrete `string` Plain field.
-		rt := reflect.TypeOf(GenericMixed[uniqueT, uniqueU, uniqueV]{})
+		rt := reflect.TypeFor[GenericMixed[uniqueT, uniqueU, uniqueV]]()
 		info, err := discoverUsingReflection(rt)
 		if err != nil {
 			t.Fatal(err)
@@ -398,6 +435,8 @@ func TestDiscoverUsingReflection(t *testing.T) {
 }
 
 func TestDetectShapeAst(t *testing.T) {
+	t.Parallel()
+
 	type want struct {
 		param string
 		kind  shape.Kind
@@ -479,6 +518,8 @@ func TestDetectShapeAst(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			expr, err := parser.ParseExpr(tt.expr)
 			if err != nil {
 				t.Fatalf("parse expr %q: %v", tt.expr, err)
@@ -491,7 +532,7 @@ func TestDetectShapeAst(t *testing.T) {
 
 			gotPairs := make([]want, len(got))
 			for i, m := range got {
-				gotPairs[i] = want{m.param, m.kind}
+				gotPairs[i] = want(m)
 			}
 			sort.Slice(gotPairs, func(i, j int) bool {
 				if gotPairs[i].param != gotPairs[j].param {
@@ -517,6 +558,8 @@ func TestDetectShapeAst(t *testing.T) {
 }
 
 func TestMatchTypeArg(t *testing.T) {
+	t.Parallel()
+
 	type want struct {
 		argIdx int
 		kind   shape.Kind
@@ -530,55 +573,55 @@ func TestMatchTypeArg(t *testing.T) {
 	}{
 		{
 			name:     "direct match",
-			field:    reflect.TypeOf(0),
+			field:    reflect.TypeFor[int](),
 			typeArgs: []string{"int"},
 			want:     []want{{0, shape.KindDirect}},
 		},
 		{
 			name:     "pointer to arg",
-			field:    reflect.TypeOf((*int)(nil)),
+			field:    reflect.TypeFor[*int](),
 			typeArgs: []string{"int"},
 			want:     []want{{0, shape.KindPointer}},
 		},
 		{
 			name:     "slice of arg",
-			field:    reflect.TypeOf([]string{}),
+			field:    reflect.TypeFor[[]string](),
 			typeArgs: []string{"string"},
 			want:     []want{{0, shape.KindSlice}},
 		},
 		{
 			name:     "fixed array of arg",
-			field:    reflect.TypeOf([3]int{}),
+			field:    reflect.TypeFor[[3]int](),
 			typeArgs: []string{"int"},
 			want:     []want{{0, shape.KindArray}},
 		},
 		{
 			name:     "map value only",
-			field:    reflect.TypeOf(map[string]int{}),
+			field:    reflect.TypeFor[map[string]int](),
 			typeArgs: []string{"int"},
 			want:     []want{{0, shape.KindMapValue}},
 		},
 		{
 			name:     "map key only",
-			field:    reflect.TypeOf(map[string]int{}),
+			field:    reflect.TypeFor[map[string]int](),
 			typeArgs: []string{"string"},
 			want:     []want{{0, shape.KindMapKey}},
 		},
 		{
 			name:     "map both key and value match different args",
-			field:    reflect.TypeOf(map[string]int{}),
+			field:    reflect.TypeFor[map[string]int](),
 			typeArgs: []string{"string", "int"},
 			want:     []want{{1, shape.KindMapValue}, {0, shape.KindMapKey}},
 		},
 		{
 			name:     "map both key and value match same arg",
-			field:    reflect.TypeOf(map[int]int{}),
+			field:    reflect.TypeFor[map[int]int](),
 			typeArgs: []string{"int"},
 			want:     []want{{0, shape.KindMapValue}, {0, shape.KindMapKey}},
 		},
 		{
 			name:     "no match",
-			field:    reflect.TypeOf(0.0),
+			field:    reflect.TypeFor[float64](),
 			typeArgs: []string{"int", "string"},
 			want:     nil,
 		},
@@ -586,6 +629,8 @@ func TestMatchTypeArg(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := matchTypeArg(tt.field, tt.typeArgs)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d matches, want %d: got=%v want=%v", len(got), len(tt.want), got, tt.want)
@@ -597,5 +642,299 @@ func TestMatchTypeArg(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// typeCheckSource type-checks a single import-free source file and returns the
+// resulting package, for exercising the go/types-based discovery path without
+// depending on the importer.
+func typeCheckSource(t *testing.T, src string) *goTypes.Package {
+	t.Helper()
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "src.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse file: %v", err)
+	}
+
+	pkg, err := (&goTypes.Config{}).Check("example", fileSet, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatalf("type check: %v", err)
+	}
+
+	return pkg
+}
+
+const discoverSource = `package example
+
+type Direct[T any] struct {
+	Data  T
+	Other string
+}
+
+type Pointer[T any] struct{ Data *T }
+
+type Slice[T any] struct{ Items []T }
+
+type Array[T any] struct{ Items [3]T }
+
+type MapValue[T any] struct{ Mapping map[string]T }
+
+type MapKey[K comparable] struct{ Mapping map[K]string }
+
+type MapKeyValue[K comparable, V any] struct{ Mapping map[K]V }
+
+type MapSameParam[T comparable] struct{ Mapping map[T]T }
+
+type Unused[T any] struct{ Plain string }
+
+type NotGenericStruct struct{ Value string }
+
+type GenericNotStruct[T any] int
+
+type Alias = int
+
+var NotType int
+`
+
+func TestDiscoverInTypesPackageShapes(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name           string
+		typeName       string
+		expectedParams []string
+		expectedShapes map[string][]shape.Shape
+		expectedFields map[string]string
+	}{
+		{
+			name:           "direct",
+			typeName:       "Direct",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{"Data": {{Param: "T", Kind: shape.KindDirect}}},
+			expectedFields: map[string]string{"T": "Data"},
+		},
+		{
+			name:           "pointer",
+			typeName:       "Pointer",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{"Data": {{Param: "T", Kind: shape.KindPointer}}},
+			expectedFields: map[string]string{"T": "Data"},
+		},
+		{
+			name:           "slice",
+			typeName:       "Slice",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{"Items": {{Param: "T", Kind: shape.KindSlice}}},
+			expectedFields: map[string]string{"T": "Items"},
+		},
+		{
+			name:           "array",
+			typeName:       "Array",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{"Items": {{Param: "T", Kind: shape.KindArray}}},
+			expectedFields: map[string]string{"T": "Items"},
+		},
+		{
+			name:           "map value",
+			typeName:       "MapValue",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{"Mapping": {{Param: "T", Kind: shape.KindMapValue}}},
+			expectedFields: map[string]string{"T": "Mapping"},
+		},
+		{
+			name:           "map key",
+			typeName:       "MapKey",
+			expectedParams: []string{"K"},
+			expectedShapes: map[string][]shape.Shape{"Mapping": {{Param: "K", Kind: shape.KindMapKey}}},
+			expectedFields: map[string]string{"K": "Mapping"},
+		},
+		{
+			name:           "map key and value",
+			typeName:       "MapKeyValue",
+			expectedParams: []string{"K", "V"},
+			expectedShapes: map[string][]shape.Shape{
+				"Mapping": {{Param: "V", Kind: shape.KindMapValue}, {Param: "K", Kind: shape.KindMapKey}},
+			},
+			expectedFields: map[string]string{"K": "Mapping", "V": "Mapping"},
+		},
+		{
+			name:           "map same param as key and value",
+			typeName:       "MapSameParam",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{
+				"Mapping": {{Param: "T", Kind: shape.KindMapValue}, {Param: "T", Kind: shape.KindMapKey}},
+			},
+			expectedFields: map[string]string{"T": "Mapping"},
+		},
+		{
+			name:           "param not used by any field",
+			typeName:       "Unused",
+			expectedParams: []string{"T"},
+			expectedShapes: map[string][]shape.Shape{},
+			expectedFields: map[string]string{},
+		},
+	}
+
+	pkg := typeCheckSource(t, discoverSource)
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := discoverInTypesPackage(pkg, testCase.typeName)
+			if err != nil {
+				t.Fatalf("discover in types package: %v", err)
+			}
+			if info == nil {
+				t.Fatal("expected non-nil info")
+			}
+
+			if !reflect.DeepEqual(info.TypeParameterNames, testCase.expectedParams) {
+				t.Errorf("TypeParameterNames = %v, want %v", info.TypeParameterNames, testCase.expectedParams)
+			}
+			if !reflect.DeepEqual(info.FieldNameToShapes, testCase.expectedShapes) {
+				t.Errorf("FieldNameToShapes = %v, want %v", info.FieldNameToShapes, testCase.expectedShapes)
+			}
+			if !reflect.DeepEqual(info.TypeParameterNameToFieldName, testCase.expectedFields) {
+				t.Errorf("TypeParameterNameToFieldName = %v, want %v", info.TypeParameterNameToFieldName, testCase.expectedFields)
+			}
+		})
+	}
+}
+
+func TestDiscoverInTypesPackageErrors(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		typeName      string
+		expectedError error
+	}{
+		{name: "object is not a type name", typeName: "NotType", expectedError: ErrNotTypeName},
+		{name: "alias is not a named type", typeName: "Alias", expectedError: ErrNotNamed},
+		{name: "named type is not a struct", typeName: "GenericNotStruct", expectedError: ErrNotStruct},
+		{name: "struct without type parameters", typeName: "NotGenericStruct"},
+	}
+
+	pkg := typeCheckSource(t, discoverSource)
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := discoverInTypesPackage(pkg, testCase.typeName)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if testCase.expectedError != nil && !errors.Is(err, testCase.expectedError) {
+				t.Errorf("error = %v, want %v", err, testCase.expectedError)
+			}
+			if info != nil {
+				t.Errorf("expected nil info, got %+v", info)
+			}
+		})
+	}
+
+	t.Run("type not found", func(t *testing.T) {
+		t.Parallel()
+
+		info, err := discoverInTypesPackage(pkg, "NoSuchType")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if info != nil {
+			t.Errorf("expected nil info for unknown type, got %+v", info)
+		}
+	})
+
+	t.Run("nil package", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := discoverInTypesPackage(nil, "Direct"); err == nil {
+			t.Error("expected an error for nil package")
+		}
+	})
+}
+
+func TestDiscoverUsingTypesImporter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nonexistent package", func(t *testing.T) {
+		t.Parallel()
+
+		info, err := discoverUsingTypesImporter("example.com/does/not/exist", "X")
+		if err == nil {
+			t.Error("expected an error for a nonexistent package")
+		}
+		if info != nil {
+			t.Errorf("expected nil info, got %+v", info)
+		}
+	})
+
+	t.Run("stdlib generic struct", func(t *testing.T) {
+		t.Parallel()
+
+		// unique.Handle[T comparable] is a generic struct in the standard
+		// library. Only its type parameter is asserted; the field layout is
+		// an implementation detail of the stdlib.
+		info, err := discoverUsingTypesImporter("unique", "Handle")
+		if err != nil {
+			t.Fatalf("discover using types importer: %v", err)
+		}
+		if info == nil {
+			t.Fatal("expected non-nil info")
+		}
+		if !reflect.DeepEqual(info.TypeParameterNames, []string{"T"}) {
+			t.Errorf("TypeParameterNames = %v, want [T]", info.TypeParameterNames)
+		}
+	})
+}
+
+func TestGetGenericTypeInfoErrors(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		reflectType   reflect.Type
+		expectedError error
+	}{
+		{name: "non-struct", reflectType: reflect.TypeFor[int](), expectedError: ErrNotStruct},
+		{name: "non-generic struct", reflectType: reflect.TypeFor[Inner](), expectedError: ErrNotGeneric},
+		{name: "anonymous struct has no type name", reflectType: reflect.TypeFor[struct{ A string }]()},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := GetGenericTypeInfo(testCase.reflectType)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if testCase.expectedError != nil && !errors.Is(err, testCase.expectedError) {
+				t.Errorf("error = %v, want %v", err, testCase.expectedError)
+			}
+			if info != nil {
+				t.Errorf("expected nil info, got %+v", info)
+			}
+		})
+	}
+}
+
+func TestGetGenericTypeInfoImporterFallback(t *testing.T) {
+	t.Parallel()
+
+	// unique.Handle is not declared in this package's working directory, so
+	// discovery must fall through to the go/types importer.
+	info, err := GetGenericTypeInfo(reflect.TypeFor[unique.Handle[string]]())
+	if err != nil {
+		t.Fatalf("get generic type info: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil info")
+	}
+	if !reflect.DeepEqual(info.TypeParameterNames, []string{"T"}) {
+		t.Errorf("TypeParameterNames = %v, want [T]", info.TypeParameterNames)
 	}
 }

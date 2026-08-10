@@ -25,8 +25,10 @@ type ctxWithEmbedded struct {
 }
 
 func TestAddRegistersStructWithProperties(t *testing.T) {
+	t.Parallel()
+
 	c := New()
-	rt := reflect.TypeOf(ctxLeaf{})
+	rt := reflect.TypeFor[ctxLeaf]()
 	if err := c.Add(rt); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -48,15 +50,17 @@ func TestAddRegistersStructWithProperties(t *testing.T) {
 }
 
 func TestAddNestedStructDiscoversBoth(t *testing.T) {
+	t.Parallel()
+
 	c := New()
-	if err := c.Add(reflect.TypeOf(ctxOuter{})); err != nil {
+	if err := c.Add(reflect.TypeFor[ctxOuter]()); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	if _, ok := c.TypeDeclarations[reflect.TypeOf(ctxOuter{})]; !ok {
+	if _, ok := c.TypeDeclarations[reflect.TypeFor[ctxOuter]()]; !ok {
 		t.Error("expected ctxOuter to be registered")
 	}
-	if _, ok := c.TypeDeclarations[reflect.TypeOf(ctxLeaf{})]; !ok {
+	if _, ok := c.TypeDeclarations[reflect.TypeFor[ctxLeaf]()]; !ok {
 		t.Error("expected ctxLeaf (nested) to be registered")
 	}
 
@@ -88,8 +92,10 @@ func TestAddNestedStructDiscoversBoth(t *testing.T) {
 }
 
 func TestAddEmbeddedStructFlattensProperties(t *testing.T) {
+	t.Parallel()
+
 	c := New()
-	rt := reflect.TypeOf(ctxWithEmbedded{})
+	rt := reflect.TypeFor[ctxWithEmbedded]()
 	if err := c.Add(rt); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -109,8 +115,10 @@ func TestAddEmbeddedStructFlattensProperties(t *testing.T) {
 }
 
 func TestAddNonStructIsIgnored(t *testing.T) {
+	t.Parallel()
+
 	c := New()
-	if err := c.Add(reflect.TypeOf(42)); err != nil {
+	if err := c.Add(reflect.TypeFor[int]()); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if len(c.TypeDeclarations) != 0 {
@@ -119,8 +127,10 @@ func TestAddNonStructIsIgnored(t *testing.T) {
 }
 
 func TestAddIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	c := New()
-	rt := reflect.TypeOf(ctxLeaf{})
+	rt := reflect.TypeFor[ctxLeaf]()
 	if err := c.Add(rt); err != nil {
 		t.Fatalf("first Add: %v", err)
 	}
@@ -130,5 +140,119 @@ func TestAddIsIdempotent(t *testing.T) {
 
 	if got := len(c.TypeDeclarationsInOrder); got != 1 {
 		t.Errorf("expected adding the same type twice to keep one declaration, got %d", got)
+	}
+}
+
+func TestTitle(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "empty", input: "", expected: ""},
+		{name: "lowercase identifier", input: "myType", expected: "MyType"},
+		{name: "already capitalized", input: "MyType", expected: "MyType"},
+		{name: "underscore identifier", input: "my_type", expected: "My_type"},
+		{name: "digit inside", input: "ip4Addr", expected: "Ip4Addr"},
+		{name: "single rune", input: "x", expected: "X"},
+		{name: "non-ascii first rune", input: "élan", expected: "Élan"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := title(testCase.input); got != testCase.expected {
+				t.Errorf("title(%q) = %q, expected %q", testCase.input, got, testCase.expected)
+			}
+		})
+	}
+}
+
+// localDupA and localDupB return distinct function-local types that share the
+// simple name "dup", forcing an identifier collision in the context.
+func localDupA() reflect.Type {
+	type dup struct {
+		A string `json:"a"`
+	}
+	return reflect.TypeFor[dup]()
+}
+
+func localDupB() reflect.Type {
+	type dup struct {
+		B int `json:"b"`
+	}
+	return reflect.TypeFor[dup]()
+}
+
+func TestAddAnonymousStructsGetAnonymousIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	c := New()
+
+	first := reflect.TypeFor[struct{ A string }]()
+	second := reflect.TypeFor[struct{ B int }]()
+	if err := c.Add(first, second); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	testCases := []struct {
+		name               string
+		reflectType        reflect.Type
+		expectedIdentifier string
+	}{
+		{name: "first anonymous struct", reflectType: first, expectedIdentifier: "Anonymous1"},
+		{name: "second anonymous struct", reflectType: second, expectedIdentifier: "Anonymous2"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			decl, ok := c.TypeDeclarations[testCase.reflectType]
+			if !ok {
+				t.Fatal("expected type to be registered")
+			}
+			if got := decl.QualifiedName(); got != testCase.expectedIdentifier {
+				t.Errorf("QualifiedName() = %q, want %q", got, testCase.expectedIdentifier)
+			}
+		})
+	}
+}
+
+func TestAddDuplicateTypeNamesGetUniqueIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	c := New()
+
+	dupA := localDupA()
+	dupB := localDupB()
+	if err := c.Add(dupA, dupB); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	testCases := []struct {
+		name               string
+		reflectType        reflect.Type
+		expectedIdentifier string
+	}{
+		{name: "first keeps base name", reflectType: dupA, expectedIdentifier: "Dup"},
+		{name: "second gets numeric suffix", reflectType: dupB, expectedIdentifier: "Dup2"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			decl, ok := c.TypeDeclarations[testCase.reflectType]
+			if !ok {
+				t.Fatal("expected type to be registered")
+			}
+			if got := decl.QualifiedName(); got != testCase.expectedIdentifier {
+				t.Errorf("QualifiedName() = %q, want %q", got, testCase.expectedIdentifier)
+			}
+		})
 	}
 }

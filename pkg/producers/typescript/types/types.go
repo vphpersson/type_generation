@@ -114,6 +114,7 @@ func (c *Context) getUnderlyingTypeScriptType(reflectType reflect.Type) (Type, e
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
 	var typeScriptType Type
+	//exhaustive:ignore
 	switch kind := reflectType.Kind(); kind {
 	case reflect.Struct:
 		if isTime(reflectType) {

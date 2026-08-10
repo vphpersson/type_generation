@@ -13,7 +13,9 @@ type sample struct {
 }
 
 func TestConvertEmitsValidJSON(t *testing.T) {
-	out, err := Convert(reflect.TypeOf(sample{}))
+	t.Parallel()
+
+	out, err := Convert(reflect.TypeFor[sample]())
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -28,5 +30,13 @@ func TestConvertEmitsValidJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, "$defs") {
 		t.Errorf("expected $defs section, got:\n%s", out)
+	}
+}
+
+func TestConvertUnsupportedRootErrors(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Convert(reflect.TypeFor[int]()); err == nil {
+		t.Error("expected an error for a non-struct root")
 	}
 }

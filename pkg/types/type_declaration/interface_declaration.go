@@ -8,7 +8,7 @@ import (
 
 type PropertySignature struct {
 	Identifier string
-	Field *reflect.StructField
+	Field      *reflect.StructField
 	Optional   bool
 }
 

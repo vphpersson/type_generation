@@ -183,8 +183,7 @@ func rootStructType(value any) reflect.Type {
 	}
 
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
-	switch reflectType.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Array:
+	if kind := reflectType.Kind(); kind == reflect.Map || kind == reflect.Slice || kind == reflect.Array {
 		reflectType = motmedelReflect.RemoveIndirection(reflectType.Elem())
 	}
 
@@ -200,6 +199,7 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 
 	var postgresType Type
 
+	//exhaustive:ignore
 	switch kind := reflectType.Kind(); kind {
 	case reflect.Struct:
 		if isTime(reflectType) {
@@ -268,6 +268,7 @@ func (c *Context) GetPostgresType(reflectType reflect.Type) (Type, error) {
 // or an associative table).
 func referencedStructTypes(fieldType reflect.Type) []reflect.Type {
 	directType := motmedelReflect.RemoveIndirection(fieldType)
+	//exhaustive:ignore
 	switch directType.Kind() {
 	case reflect.Struct:
 		if isTime(directType) {

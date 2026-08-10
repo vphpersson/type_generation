@@ -3,9 +3,9 @@ package type_declaration
 import "reflect"
 
 type TypeAliasDeclaration struct {
-	Identifier string
+	Identifier     string
 	TypeParameters []string
-	ReflectType reflect.Type
+	ReflectType    reflect.Type
 }
 
 func (t *TypeAliasDeclaration) QualifiedName() string {

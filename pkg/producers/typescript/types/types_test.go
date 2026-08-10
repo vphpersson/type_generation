@@ -47,7 +47,9 @@ func renderTS(t *testing.T, rt reflect.Type) string {
 }
 
 func TestRenderGenericMapValueOnly(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(genericValue[int]{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[genericValue[int]]())
 
 	if !strings.Contains(out, "<V>") {
 		t.Errorf("expected interface to declare type parameter <V>, got:\n%s", out)
@@ -58,7 +60,9 @@ func TestRenderGenericMapValueOnly(t *testing.T) {
 }
 
 func TestRenderGenericTwoParams(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(genericPair[int, string]{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[genericPair[int, string]]())
 
 	if !strings.Contains(out, "<T, U>") {
 		t.Errorf("expected <T, U>, got:\n%s", out)
@@ -72,10 +76,12 @@ func TestRenderGenericTwoParams(t *testing.T) {
 }
 
 func TestRenderGenericPointerAndSlice(t *testing.T) {
+	t.Parallel()
+
 	// Both fields share the single type parameter T — Pointer becomes T,
 	// Slice becomes T[]. This exercises the same param appearing under two
 	// different field names.
-	out := renderTS(t, reflect.TypeOf(genericPointerSlice[int]{}))
+	out := renderTS(t, reflect.TypeFor[genericPointerSlice[int]]())
 
 	if !strings.Contains(out, "<T>") {
 		t.Errorf("expected <T>, got:\n%s", out)
@@ -109,6 +115,8 @@ func addAndGetInterface(t *testing.T, rt reflect.Type) *type_declaration.Interfa
 }
 
 func TestGenericMapKeyValueBothGeneric_DataLayer(t *testing.T) {
+	t.Parallel()
+
 	// This is the case the bug fix targets: a single field whose generic
 	// instantiation has BOTH a generic key and a generic value. Before the
 	// fix, only one of K / V would be recorded; after the fix, the
@@ -119,7 +127,7 @@ func TestGenericMapKeyValueBothGeneric_DataLayer(t *testing.T) {
 	// because MapType.String() has a separate, pre-existing limitation
 	// that rejects non-`string`/`number` index types — including type
 	// parameters. That's a different issue and not part of this fix.
-	iface := addAndGetInterface(t, reflect.TypeOf(genericKeyValue[string, int]{}))
+	iface := addAndGetInterface(t, reflect.TypeFor[genericKeyValue[string, int]]())
 
 	if iface.GenericTypeInfo == nil {
 		t.Fatal("expected GenericTypeInfo to be populated")
@@ -135,6 +143,7 @@ func TestGenericMapKeyValueBothGeneric_DataLayer(t *testing.T) {
 
 	var keyParam, valueParam string
 	for _, s := range shapes {
+		//exhaustive:ignore
 		switch s.Kind {
 		case shape.KindMapKey:
 			keyParam = s.Param
@@ -169,7 +178,9 @@ type simpleInterface struct {
 }
 
 func TestRenderSimpleInterface(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(simpleInterface{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[simpleInterface]())
 
 	for _, want := range []string{
 		"export interface SimpleInterface",
@@ -190,7 +201,9 @@ type withOptional struct {
 }
 
 func TestRenderOptionalAndSkipped(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(withOptional{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[withOptional]())
 
 	if !strings.Contains(out, "maybe?:") {
 		t.Errorf("expected `maybe?:` (optional marker), got:\n%s", out)
@@ -209,7 +222,9 @@ type withMapAndSlice struct {
 }
 
 func TestRenderMapAndSlice(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(withMapAndSlice{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[withMapAndSlice]())
 
 	if !strings.Contains(out, "{ [key: string]: number }") {
 		t.Errorf("expected map rendered as `{ [key: string]: number }`, got:\n%s", out)
@@ -229,7 +244,9 @@ type withEmbedded struct {
 }
 
 func TestRenderEmbeddedStruct(t *testing.T) {
-	out := renderTS(t, reflect.TypeOf(withEmbedded{}))
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[withEmbedded]())
 
 	// Both fields from the embedded struct and the outer struct should appear
 	// in the same interface — embedded structs are flattened into the outer
@@ -249,10 +266,12 @@ type withTypeAlias struct {
 }
 
 func TestRenderPrimitiveTypeAlias(t *testing.T) {
+	t.Parallel()
+
 	// A field whose Go type is a named primitive (e.g. `type MyInt int`)
 	// should both reference that name and emit a standalone
 	// `export type MyInt = number;` declaration.
-	out := renderTS(t, reflect.TypeOf(withTypeAlias{}))
+	out := renderTS(t, reflect.TypeFor[withTypeAlias]())
 
 	if !strings.Contains(out, "count: MyInt") {
 		t.Errorf("expected count to reference MyInt, got:\n%s", out)
@@ -271,11 +290,13 @@ type nestedOuter struct {
 }
 
 func TestRenderNamedStructFieldDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
 	// Regression: GetTypeScriptType used to apply the type-alias path to any
 	// named type, including struct types whose TypeDeclaration is an
 	// *InterfaceDeclaration. That produced a "convert: conversion not ok:
 	// *type_declaration.InterfaceDeclaration" error during rendering.
-	out := renderTS(t, reflect.TypeOf(nestedOuter{}))
+	out := renderTS(t, reflect.TypeFor[nestedOuter]())
 
 	if !strings.Contains(out, "inner: NestedInner") {
 		t.Errorf("expected inner field to reference NestedInner, got:\n%s", out)
@@ -283,9 +304,11 @@ func TestRenderNamedStructFieldDoesNotPanic(t *testing.T) {
 }
 
 func TestGenericMapKeyOnly_DataLayer(t *testing.T) {
+	t.Parallel()
+
 	// Sanity check that map[K]string still works (only one shape, KindMapKey)
 	// and was not broken by changing the underlying representation to a slice.
-	iface := addAndGetInterface(t, reflect.TypeOf(genericKey[string]{}))
+	iface := addAndGetInterface(t, reflect.TypeFor[genericKey[string]]())
 
 	shapes := iface.GenericTypeInfo.FieldNameToShapes["Mapping"]
 	if len(shapes) != 1 {
@@ -302,13 +325,119 @@ type withBinary struct {
 }
 
 func TestRenderByteSlice(t *testing.T) {
+	t.Parallel()
+
 	// []byte carries binary data and should render as Uint8Array, not number[].
-	out := renderTS(t, reflect.TypeOf(withBinary{}))
+	out := renderTS(t, reflect.TypeFor[withBinary]())
 
 	if !strings.Contains(out, "content: Uint8Array") {
 		t.Errorf("expected content to be Uint8Array, got:\n%s", out)
 	}
 	if !strings.Contains(out, "documents: Uint8Array[]") {
 		t.Errorf("expected documents to be Uint8Array[], got:\n%s", out)
+	}
+}
+
+// fakeDeclaration is a minimal TypeDeclaration for exercising TypeReference
+// rendering without wiring up a full context.
+type fakeDeclaration string
+
+func (f fakeDeclaration) TypeReference() *TypeReference { return &TypeReference{TypeDeclaration: f} }
+
+func (f fakeDeclaration) QualifiedName() string { return string(f) }
+
+func TestTypeString(t *testing.T) {
+	t.Parallel()
+
+	badType := &MapType{IndexType: Boolean, ValueType: String}
+
+	testCases := []struct {
+		name        string
+		input       Type
+		expected    string
+		expectError bool
+	}{
+		{name: "basic type", input: String, expected: "string"},
+		{name: "type parameter", input: &TypeParameter{Identifier: "T"}, expected: "T"},
+		{
+			name:     "type reference without arguments",
+			input:    &TypeReference{TypeDeclaration: fakeDeclaration("Foo")},
+			expected: "Foo",
+		},
+		{
+			name: "type reference with arguments",
+			input: &TypeReference{
+				TypeDeclaration: fakeDeclaration("Foo"),
+				TypeArguments:   []Type{String, Number},
+			},
+			expected: "Foo<string, number>",
+		},
+		{
+			name: "type reference with failing argument",
+			input: &TypeReference{
+				TypeDeclaration: fakeDeclaration("Foo"),
+				TypeArguments:   []Type{badType},
+			},
+			expectError: true,
+		},
+		{name: "union type", input: UnionType{Types: []Type{String, Null}}, expected: "string | null"},
+		{name: "union type with failing member", input: UnionType{Types: []Type{badType}}, expectError: true},
+		{name: "array type", input: &ArrayType{ItemsType: String}, expected: "string[]"},
+		{
+			name:     "array of union is parenthesized",
+			input:    &ArrayType{ItemsType: &UnionType{Types: []Type{String, Null}}},
+			expected: "(string | null)[]",
+		},
+		{name: "array type with failing items", input: &ArrayType{ItemsType: badType}, expectError: true},
+		{
+			name:     "map with number index",
+			input:    &MapType{IndexType: Number, ValueType: String},
+			expected: "{ [key: number]: string }",
+		},
+		{name: "map with unsupported index", input: badType, expectError: true},
+		{
+			name:        "map with failing index",
+			input:       &MapType{IndexType: badType, ValueType: String},
+			expectError: true,
+		},
+		{
+			name:        "map with failing value",
+			input:       &MapType{IndexType: String, ValueType: badType},
+			expectError: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := testCase.input.String()
+			if testCase.expectError {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != testCase.expected {
+				t.Errorf("String() = %q, want %q", got, testCase.expected)
+			}
+		})
+	}
+}
+
+type withNumberKeyMap struct {
+	Counts map[int]string `json:"counts"`
+}
+
+func TestRenderNumberKeyMap(t *testing.T) {
+	t.Parallel()
+
+	out := renderTS(t, reflect.TypeFor[withNumberKeyMap]())
+
+	if !strings.Contains(out, "{ [key: number]: string }") {
+		t.Errorf("expected map rendered with number index, got:\n%s", out)
 	}
 }

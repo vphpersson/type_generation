@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"go/ast"
 	"reflect"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Motmedel/utils_go/pkg/errors/types/nil_error"
 	"github.com/vphpersson/type_generation/internal/generic_type_info"
 	typeGenerationErrors "github.com/vphpersson/type_generation/pkg/errors"
 	"github.com/vphpersson/type_generation/pkg/types/shape"
 	"github.com/vphpersson/type_generation/pkg/types/type_declaration"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	motmedelErrors "github.com/Motmedel/utils_go/pkg/errors"
 	motmedelReflect "github.com/Motmedel/utils_go/pkg/reflect"
@@ -48,6 +48,14 @@ func isPrimitive(kind reflect.Kind) bool {
 
 func isPrimitiveAlias(reflectType reflect.Type) bool {
 	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
+}
+
+func title(s string) string {
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && size <= 1 {
+		return s
+	}
+	return string(unicode.ToTitle(r)) + s[size:]
 }
 
 type optionalFieldPolicy int
@@ -94,15 +102,11 @@ func (g *Context) populateProperties(
 		return motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, structTypeKind)
 	}
 
-	caser := cases.Title(language.English, cases.NoLower)
-
 	// Iterate over normal fields first, and embedded structs last. This ensures that outer fields
 	// will take precedence over inner fields in the case of overlapping fields, which is consistent
 	// with json.Marshal().
 	var embeddedFields []reflect.StructField
-	for i := range structType.NumField() {
-		field := structType.Field(i)
-
+	for field := range structType.Fields() {
 		if len(field.Name) == 0 || !ast.IsExported(field.Name) {
 			continue
 		}
@@ -130,6 +134,7 @@ func (g *Context) populateProperties(
 
 		directType := motmedelReflect.RemoveIndirection(field.Type)
 
+		//exhaustive:ignore
 		switch directType.Kind() {
 		case reflect.Struct:
 			if _, err := g.GetOrCreateInterfaceDeclaration(directType); err != nil {
@@ -156,7 +161,7 @@ func (g *Context) populateProperties(
 		if useTypeAlias {
 			if _, ok := g.TypeDeclarations[directType]; !ok {
 				typeName, _ := motmedelReflect.GetTypeName(directType)
-				identifier := caser.String(typeName)
+				identifier := title(typeName)
 				if identifier == "" {
 					identifier = g.makeUniqueAnonymousIdentifier()
 				}
@@ -187,7 +192,7 @@ func (g *Context) populateProperties(
 		// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
 		// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
 		embeddedStructOptionalFieldPolicy := dontForceOptional
-		if optionalFieldPolicy == forceOptional || field.Type.Kind() == reflect.Ptr {
+		if optionalFieldPolicy == forceOptional || field.Type.Kind() == reflect.Pointer {
 			embeddedStructOptionalFieldPolicy = forceOptional
 		}
 
@@ -216,7 +221,7 @@ func (g *Context) GetOrCreateInterfaceDeclaration(structType reflect.Type) (*typ
 	}
 
 	typeName, isGenericType := motmedelReflect.GetTypeName(structType)
-	interfaceName := cases.Title(language.English, cases.NoLower).String(typeName)
+	interfaceName := title(typeName)
 	if interfaceName == "" {
 		interfaceName = g.makeUniqueAnonymousIdentifier()
 	}
@@ -308,8 +313,7 @@ func (g *Context) Add(values ...any) error {
 
 		reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
-		switch reflectType.Kind() {
-		case reflect.Map, reflect.Slice, reflect.Array:
+		if kind := reflectType.Kind(); kind == reflect.Map || kind == reflect.Slice || kind == reflect.Array {
 			reflectType = motmedelReflect.RemoveIndirection(reflectType.Elem())
 		}
 

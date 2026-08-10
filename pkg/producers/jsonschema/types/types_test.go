@@ -14,8 +14,10 @@ type SimpleStruct struct {
 }
 
 func TestRenderRootStruct(t *testing.T) {
+	t.Parallel()
+
 	ctx := &Context{Context: typeGenerationContext.New()}
-	rt := reflect.TypeOf(SimpleStruct{})
+	rt := reflect.TypeFor[SimpleStruct]()
 	if err := ctx.Add(rt); err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +46,10 @@ func TestRenderRootStruct(t *testing.T) {
 }
 
 func TestRenderRootSlice(t *testing.T) {
+	t.Parallel()
+
 	ctx := &Context{Context: typeGenerationContext.New()}
-	rt := reflect.TypeOf([]SimpleStruct{})
+	rt := reflect.TypeFor[[]SimpleStruct]()
 	if err := ctx.Add(rt); err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +95,10 @@ func TestRenderRootSlice(t *testing.T) {
 }
 
 func TestRenderRootPointerToSlice(t *testing.T) {
+	t.Parallel()
+
 	ctx := &Context{Context: typeGenerationContext.New()}
-	rt := reflect.TypeOf(&[]SimpleStruct{})
+	rt := reflect.TypeFor[*[]SimpleStruct]()
 	if err := ctx.Add(rt); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +120,10 @@ func TestRenderRootPointerToSlice(t *testing.T) {
 }
 
 func TestRenderRootArray(t *testing.T) {
+	t.Parallel()
+
 	ctx := &Context{Context: typeGenerationContext.New()}
-	rt := reflect.TypeOf([3]SimpleStruct{})
+	rt := reflect.TypeFor[[3]SimpleStruct]()
 	if err := ctx.Add(rt); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +185,9 @@ type Primitives struct {
 }
 
 func TestPrimitiveTypeMappings(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(Primitives{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[Primitives]())
 	def := resolveDef(t, schema, "Primitives")
 
 	properties, ok := def["properties"].(map[string]any)
@@ -210,7 +220,9 @@ type WithValidationTags struct {
 }
 
 func TestValidationTagsAreApplied(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(WithValidationTags{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[WithValidationTags]())
 	def := resolveDef(t, schema, "WithValidationTags")
 	props := def["properties"].(map[string]any)
 
@@ -259,7 +271,9 @@ type Outer struct {
 }
 
 func TestNestedStructAddsBothToDefs(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(Outer{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[Outer]())
 
 	defs, ok := schema["$defs"].(map[string]any)
 	if !ok {
@@ -298,7 +312,9 @@ type WithPointers struct {
 }
 
 func TestPointerFieldsAreNullable(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(WithPointers{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[WithPointers]())
 	def := resolveDef(t, schema, "WithPointers")
 	props := def["properties"].(map[string]any)
 
@@ -354,7 +370,9 @@ type WithBytes struct {
 }
 
 func TestBytesBecomeBase64String(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(WithBytes{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[WithBytes]())
 	def := resolveDef(t, schema, "WithBytes")
 	blob := def["properties"].(map[string]any)["blob"].(map[string]any)
 
@@ -373,7 +391,9 @@ type WithOptional struct {
 }
 
 func TestOptionalAndSkippedFields(t *testing.T) {
-	schema := renderRootSchema(t, reflect.TypeOf(WithOptional{}))
+	t.Parallel()
+
+	schema := renderRootSchema(t, reflect.TypeFor[WithOptional]())
 	def := resolveDef(t, schema, "WithOptional")
 
 	props := def["properties"].(map[string]any)
@@ -396,5 +416,66 @@ func TestOptionalAndSkippedFields(t *testing.T) {
 	}
 	if requiredSet["maybe"] {
 		t.Errorf("`maybe` (omitempty) should not be in required list, got %v", required)
+	}
+}
+
+func TestMakeNullable(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    map[string]any
+		expected map[string]any
+	}{
+		{
+			name:  "ref is wrapped in anyOf",
+			input: map[string]any{"$ref": "#/$defs/X"},
+			expected: map[string]any{
+				"anyOf": []any{
+					map[string]any{"$ref": "#/$defs/X"},
+					map[string]any{"type": "null"},
+				},
+			},
+		},
+		{
+			name:     "plain type is widened to a tuple",
+			input:    map[string]any{"type": "string"},
+			expected: map[string]any{"type": []any{"string", "null"}},
+		},
+		{
+			name:     "null type is unchanged",
+			input:    map[string]any{"type": "null"},
+			expected: map[string]any{"type": "null"},
+		},
+		{
+			name:     "type tuple gets null appended",
+			input:    map[string]any{"type": []any{"string", "integer"}},
+			expected: map[string]any{"type": []any{"string", "integer", "null"}},
+		},
+		{
+			name:     "type tuple with null is unchanged",
+			input:    map[string]any{"type": []any{"string", "null"}},
+			expected: map[string]any{"type": []any{"string", "null"}},
+		},
+		{
+			name:  "schema without type is wrapped in anyOf",
+			input: map[string]any{"enum": []any{"a", "b"}},
+			expected: map[string]any{
+				"anyOf": []any{
+					map[string]any{"enum": []any{"a", "b"}},
+					map[string]any{"type": "null"},
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := makeNullable(testCase.input); !reflect.DeepEqual(got, testCase.expected) {
+				t.Errorf("makeNullable() = %v, want %v", got, testCase.expected)
+			}
+		})
 	}
 }

@@ -21,6 +21,17 @@ type Context struct {
 	*typeGenerationContext.Context
 }
 
+// JSON Schema type names.
+const (
+	schemaTypeString  = "string"
+	schemaTypeInteger = "integer"
+	schemaTypeNumber  = "number"
+	schemaTypeBoolean = "boolean"
+	schemaTypeArray   = "array"
+	schemaTypeObject  = "object"
+	schemaTypeNull    = "null"
+)
+
 func isTime(t reflect.Type) bool {
 	return t.Name() == "Time" && t.PkgPath() == "time"
 }
@@ -29,10 +40,11 @@ func isTime(t reflect.Type) bool {
 func (c *Context) GetJSONSchemaType(reflectType reflect.Type) (map[string]any, error) {
 	reflectType = motmedelReflect.RemoveIndirection(reflectType)
 
+	//exhaustive:ignore
 	switch kind := reflectType.Kind(); kind {
 	case reflect.Struct:
 		if isTime(reflectType) {
-			return map[string]any{"type": "string", "format": "date-time"}, nil
+			return map[string]any{"type": schemaTypeString, "format": "date-time"}, nil
 		}
 
 		// Reference another interface via local $defs
@@ -45,24 +57,24 @@ func (c *Context) GetJSONSchemaType(reflectType reflect.Type) (map[string]any, e
 		return nil, motmedelErrors.NewWithTrace(typeGenerationErrors.ErrUnsupportedKind, kind)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return map[string]any{"type": "integer"}, nil
+		return map[string]any{"type": schemaTypeInteger}, nil
 	case reflect.Float32, reflect.Float64:
-		return map[string]any{"type": "number"}, nil
+		return map[string]any{"type": schemaTypeNumber}, nil
 	case reflect.String:
-		return map[string]any{"type": "string"}, nil
+		return map[string]any{"type": schemaTypeString}, nil
 	case reflect.Bool:
-		return map[string]any{"type": "boolean"}, nil
+		return map[string]any{"type": schemaTypeBoolean}, nil
 	case reflect.Slice, reflect.Array:
 		// Special case: []byte -> base64 string
 		elem := motmedelReflect.RemoveIndirection(reflectType.Elem())
 		if elem.Kind() == reflect.Uint8 {
-			return map[string]any{"type": "string", "contentEncoding": "base64"}, nil
+			return map[string]any{"type": schemaTypeString, "contentEncoding": "base64"}, nil
 		}
 		itemSchema, err := c.GetJSONSchemaType(elem)
 		if err != nil {
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type (items): %w", err), elem)
 		}
-		return map[string]any{"type": "array", "items": itemSchema}, nil
+		return map[string]any{"type": schemaTypeArray, "items": itemSchema}, nil
 	case reflect.Map:
 		// JSON object with additionalProperties as value schema
 		value := motmedelReflect.RemoveIndirection(reflectType.Elem())
@@ -70,7 +82,7 @@ func (c *Context) GetJSONSchemaType(reflectType reflect.Type) (map[string]any, e
 		if err != nil {
 			return nil, motmedelErrors.New(fmt.Errorf("get json schema type (map value): %w", err), value)
 		}
-		return map[string]any{"type": "object", "additionalProperties": valueSchema}, nil
+		return map[string]any{"type": schemaTypeObject, "additionalProperties": valueSchema}, nil
 	case reflect.Interface:
 		return map[string]any{}, nil
 	case reflect.Pointer:
@@ -91,32 +103,32 @@ func makeNullable(propertySchema map[string]any) map[string]any {
 		return map[string]any{
 			"anyOf": []any{
 				propertySchema,
-				map[string]any{"type": "null"},
+				map[string]any{"type": schemaTypeNull},
 			},
 		}
 	}
 
 	switch t := propertySchema["type"].(type) {
 	case string:
-		if t != "null" {
-			propertySchema["type"] = []any{t, "null"}
+		if t != schemaTypeNull {
+			propertySchema["type"] = []any{t, schemaTypeNull}
 		}
 	case []any:
 		hasNull := false
 		for _, x := range t {
-			if x == "null" {
+			if x == schemaTypeNull {
 				hasNull = true
 				break
 			}
 		}
 		if !hasNull {
-			propertySchema["type"] = append(t, "null")
+			propertySchema["type"] = append(t, schemaTypeNull)
 		}
 	default:
 		return map[string]any{
 			"anyOf": []any{
 				propertySchema,
-				map[string]any{"type": "null"},
+				map[string]any{"type": schemaTypeNull},
 			},
 		}
 	}
@@ -124,10 +136,10 @@ func makeNullable(propertySchema map[string]any) map[string]any {
 	return propertySchema
 }
 
-// buildInterfaceSchema builds the object schema for a given interface declaration
+// buildInterfaceSchema builds the object schema for a given interface declaration.
 func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.InterfaceDeclaration) (map[string]any, error) {
 	schemaMap := map[string]any{
-		"type": "object",
+		"type": schemaTypeObject,
 	}
 
 	properties := map[string]any{}
@@ -193,9 +205,9 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 
 		if t, ok := propertySchema["type"].(string); ok {
 			switch t {
-			case "string":
+			case schemaTypeString:
 				propertySchema["minLength"] = 1
-			case "array":
+			case schemaTypeArray:
 				propertySchema["minItems"] = 1
 			}
 		}
@@ -209,21 +221,21 @@ func (c *Context) buildInterfaceSchema(interfaceDeclaration *type_declaration.In
 
 			if t, ok := propertySchema["type"].(string); ok {
 				switch t {
-				case "string":
+				case schemaTypeString:
 					if minLength := jsonschemaTag.MinLength; minLength != nil {
 						propertySchema["minLength"] = *minLength
 					}
 					if maxLength := jsonschemaTag.MaxLength; maxLength != nil {
 						propertySchema["maxLength"] = *maxLength
 					}
-				case "number", "integer":
+				case schemaTypeNumber, schemaTypeInteger:
 					if minimum := jsonschemaTag.Minimum; minimum != nil {
 						propertySchema["minimum"] = *minimum
 					}
 					if maximum := jsonschemaTag.Maximum; maximum != nil {
 						propertySchema["maximum"] = *maximum
 					}
-				case "array":
+				case schemaTypeArray:
 					if minItems := jsonschemaTag.MinItems; minItems != nil {
 						propertySchema["minItems"] = *minItems
 					}
@@ -267,6 +279,7 @@ func (c *Context) RenderRoot(root reflect.Type) (string, error) {
 	elemType := root
 	rootKind := root.Kind()
 
+	//exhaustive:ignore
 	switch rootKind {
 	case reflect.Slice, reflect.Array:
 		isArray = true
@@ -321,7 +334,7 @@ func (c *Context) RenderRoot(root reflect.Type) (string, error) {
 
 	if isArray {
 		schemaMap["title"] = rootInterfaceDeclarationIdentifier + "Array"
-		schemaMap["type"] = "array"
+		schemaMap["type"] = schemaTypeArray
 		schemaMap["items"] = map[string]any{"$ref": "#/$defs/" + rootInterfaceDeclarationIdentifier}
 	} else {
 		schemaMap["title"] = rootInterfaceDeclarationIdentifier

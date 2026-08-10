@@ -9,6 +9,7 @@ import (
 	"go/token"
 	goTypes "go/types"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -75,10 +76,20 @@ func detectShapeTypes(
 }
 
 func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_info.GenericTypeInfo, error) {
-	pkg, err := importer.Default().Import(pkgPath)
+	defaultImporter := importer.Default()
+	if defaultImporter == nil {
+		return nil, motmedelErrors.NewWithTrace(nil_error.New("default importer"))
+	}
+
+	pkg, err := defaultImporter.Import(pkgPath)
 	if err != nil {
 		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("go importer default import: %w", err))
 	}
+
+	return discoverInTypesPackage(pkg, typeName)
+}
+
+func discoverInTypesPackage(pkg *goTypes.Package, typeName string) (*generic_type_info.GenericTypeInfo, error) {
 	if pkg == nil {
 		return nil, motmedelErrors.NewWithTrace(nil_error.New("package"))
 	}
@@ -123,8 +134,7 @@ func discoverUsingTypesImporter(pkgPath string, typeName string) (*generic_type_
 
 	fieldNameToShapes := map[string][]shape.Shape{}
 	paramToField := map[string]string{}
-	for i := range structType.NumFields() {
-		field := structType.Field(i)
+	for field := range structType.Fields() {
 		matches := detectShapeTypes(field.Type(), parameterNamesSet)
 		if len(matches) == 0 {
 			continue
@@ -194,82 +204,99 @@ func discoverInWorkingDir(typeName string) (*generic_type_info.GenericTypeInfo, 
 		return nil, motmedelErrors.NewWithTrace(fmt.Errorf("os getwd: %w", err))
 	}
 
-	packages, err := parser.ParseDir(token.NewFileSet(), workingDirectoryPath, nil, 0)
+	entries, err := os.ReadDir(workingDirectoryPath)
 	if err != nil {
 		return nil, motmedelErrors.NewWithTrace(
-			fmt.Errorf("go parser parse dir: %w", err),
+			fmt.Errorf("os read dir: %w", err),
 			workingDirectoryPath,
 		)
 	}
 
-	for _, pkg := range packages {
-		for _, file := range pkg.Files {
-			for _, topLevelDeclaration := range file.Decls {
-				genericDeclarationNode, ok := topLevelDeclaration.(*ast.GenDecl)
-				if !ok || genericDeclarationNode.Tok != token.TYPE {
+	fileSet := token.NewFileSet()
+	var files []*ast.File
+	for _, entry := range entries {
+		entryName := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(entryName, ".go") {
+			continue
+		}
+
+		filePath := filepath.Join(workingDirectoryPath, entryName)
+		file, err := parser.ParseFile(fileSet, filePath, nil, 0)
+		if err != nil {
+			return nil, motmedelErrors.NewWithTrace(
+				fmt.Errorf("go parser parse file: %w", err),
+				filePath,
+			)
+		}
+		files = append(files, file)
+	}
+
+	for _, file := range files {
+		for _, topLevelDeclaration := range file.Decls {
+			genericDeclarationNode, ok := topLevelDeclaration.(*ast.GenDecl)
+			if !ok || genericDeclarationNode.Tok != token.TYPE {
+				continue
+			}
+
+			for _, spec := range genericDeclarationNode.Specs {
+				// Find the type spec for the base type.
+
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || typeSpec.Name == nil || typeSpec.Name.Name != typeName {
+					continue
+				}
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
 					continue
 				}
 
-				for _, spec := range genericDeclarationNode.Specs {
-					// Find the type spec for the base type.
+				// Extract the type parameters
 
-					typeSpec, ok := spec.(*ast.TypeSpec)
-					if !ok || typeSpec.Name == nil || typeSpec.Name.Name != typeName {
-						continue
-					}
-					structType, ok := typeSpec.Type.(*ast.StructType)
-					if !ok {
-						continue
-					}
-
-					// Extract the type parameters
-
-					var paramNames []string
-					paramSet := map[string]struct{}{}
-					if typeParams := typeSpec.TypeParams; typeParams != nil {
-						for _, field := range typeParams.List {
-							for _, identifier := range field.Names {
-								paramNames = append(paramNames, identifier.Name)
-								paramSet[identifier.Name] = struct{}{}
-							}
-						}
-					}
-					// TODO: No parameters? Can this happen?
-					if len(paramNames) == 0 {
-						continue
-					}
-
-					fieldShapes := map[string][]shape.Shape{}
-					paramToField := map[string]string{}
-					for _, field := range structType.Fields.List {
-						if len(field.Names) == 0 {
-							continue
-						}
-
-						matches := detectShapeAst(field.Type, paramSet)
-						if len(matches) == 0 {
-							continue
-						}
-
+				var paramNames []string
+				paramSet := map[string]struct{}{}
+				if typeParams := typeSpec.TypeParams; typeParams != nil {
+					for _, field := range typeParams.List {
 						for _, identifier := range field.Names {
-							for _, m := range matches {
-								fieldShapes[identifier.Name] = append(
-									fieldShapes[identifier.Name],
-									shape.Shape{Param: m.param, Kind: m.kind},
-								)
-								if _, exists := paramToField[m.param]; !exists {
-									paramToField[m.param] = identifier.Name
-								}
+							paramNames = append(paramNames, identifier.Name)
+							paramSet[identifier.Name] = struct{}{}
+						}
+					}
+				}
+				// TODO: No parameters? Can this happen?
+				if len(paramNames) == 0 {
+					continue
+				}
+
+				fieldShapes := map[string][]shape.Shape{}
+				paramToField := map[string]string{}
+				for _, field := range structType.Fields.List {
+					if len(field.Names) == 0 {
+						continue
+					}
+
+					matches := detectShapeAst(field.Type, paramSet)
+					if len(matches) == 0 {
+						continue
+					}
+
+					for _, identifier := range field.Names {
+						for _, m := range matches {
+							fieldShapes[identifier.Name] = append(
+								fieldShapes[identifier.Name],
+								shape.Shape{Param: m.param, Kind: m.kind},
+							)
+							if _, exists := paramToField[m.param]; !exists {
+								paramToField[m.param] = identifier.Name
 							}
 						}
 					}
-
-					return &generic_type_info.GenericTypeInfo{
-						TypeParameterNames:           paramNames,
-						FieldNameToShapes:            fieldShapes,
-						TypeParameterNameToFieldName: paramToField,
-					}, nil
 				}
+
+				return &generic_type_info.GenericTypeInfo{
+					TypeParameterNames:           paramNames,
+					FieldNameToShapes:            fieldShapes,
+					TypeParameterNameToFieldName: paramToField,
+				}, nil
 			}
 		}
 	}
@@ -329,8 +356,9 @@ func matchTypeArg(fieldType reflect.Type, typeArgs []string) []reflectMatch {
 	}
 
 	var matches []reflectMatch
+	//exhaustive:ignore
 	switch fieldType.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		ftn = fullTypeName(fieldType.Elem())
 		for i, arg := range typeArgs {
 			if ftn == arg {
@@ -383,8 +411,7 @@ func discoverUsingReflection(structType reflect.Type) (*generic_type_info.Generi
 	fieldNameToShapes := map[string][]shape.Shape{}
 	paramToField := map[string]string{}
 
-	for i := range structType.NumField() {
-		field := structType.Field(i)
+	for field := range structType.Fields() {
 		matches := matchTypeArg(field.Type, typeArgs)
 		if len(matches) == 0 {
 			continue

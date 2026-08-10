@@ -6,6 +6,8 @@ import (
 )
 
 func TestNewEmpty(t *testing.T) {
+	t.Parallel()
+
 	if got := New(""); got != nil {
 		t.Errorf("expected nil for empty input, got %+v", got)
 	}
@@ -15,6 +17,8 @@ func TestNewEmpty(t *testing.T) {
 }
 
 func TestNewSkip(t *testing.T) {
+	t.Parallel()
+
 	tag := New("-")
 	if tag == nil {
 		t.Fatal("expected non-nil tag for -")
@@ -28,6 +32,8 @@ func TestNewSkip(t *testing.T) {
 }
 
 func TestNewBooleanFlags(t *testing.T) {
+	t.Parallel()
+
 	tag := New("id_col,primarykey,unique,nullable,indexed,uniquecomposite")
 	if tag == nil {
 		t.Fatal("expected non-nil tag")
@@ -53,6 +59,8 @@ func TestNewBooleanFlags(t *testing.T) {
 }
 
 func TestNewKeyValuePairs(t *testing.T) {
+	t.Parallel()
+
 	tag := New("col,default:'now()',check:'len > 0',ondelete:cascade,onupdate:restrict,type:bigint,generated:expr,generatedstored:expr2")
 	if tag == nil {
 		t.Fatal("expected non-nil tag")
@@ -85,6 +93,8 @@ func TestNewKeyValuePairs(t *testing.T) {
 }
 
 func TestSplitTopCommas_PreservesCommasInQuotedSQL(t *testing.T) {
+	t.Parallel()
+
 	input := "policy,check:'status IN (''A'', ''B'')'"
 	parts := splitTopCommas(input)
 	want := []string{"policy", "check:'status IN (''A'', ''B'')'"}
@@ -94,6 +104,8 @@ func TestSplitTopCommas_PreservesCommasInQuotedSQL(t *testing.T) {
 }
 
 func TestSplitTopCommas_PreservesCommasInsideParens(t *testing.T) {
+	t.Parallel()
+
 	// Top-level comma after the paren group splits; the comma inside parens does not.
 	input := "col,default:func(a, b),unique"
 	parts := splitTopCommas(input)
@@ -104,6 +116,8 @@ func TestSplitTopCommas_PreservesCommasInsideParens(t *testing.T) {
 }
 
 func TestSplitTopCommas_DoubleQuotes(t *testing.T) {
+	t.Parallel()
+
 	input := `col,default:"a,b,c",unique`
 	parts := splitTopCommas(input)
 	want := []string{"col", `default:"a,b,c"`, "unique"}
@@ -113,6 +127,8 @@ func TestSplitTopCommas_DoubleQuotes(t *testing.T) {
 }
 
 func TestNewUnknownOptionFallsToOtherOptions(t *testing.T) {
+	t.Parallel()
+
 	tag := New("col,no_such_flag,custom:value")
 	if tag == nil {
 		t.Fatal("expected non-nil tag")
@@ -131,8 +147,13 @@ func TestNewUnknownOptionFallsToOtherOptions(t *testing.T) {
 }
 
 func TestNewCaseInsensitiveFlags(t *testing.T) {
+	t.Parallel()
+
 	// The parser lowercases flag matches.
 	tag := New("c,PRIMARYKEY,Unique")
+	if tag == nil {
+		t.Fatal("expected non-nil tag")
+	}
 	if !tag.PrimaryKey {
 		t.Error("expected PRIMARYKEY to match PrimaryKey")
 	}

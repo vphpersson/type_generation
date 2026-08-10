@@ -7,6 +7,7 @@ import (
 	"time"
 
 	typeGenerationContext "github.com/vphpersson/type_generation/pkg/types/context"
+	"github.com/vphpersson/type_generation/pkg/types/type_declaration"
 )
 
 type pgPrimitives struct {
@@ -61,7 +62,9 @@ func renderPG(t *testing.T, values ...any) string {
 }
 
 func TestPrimitiveTypeMappings(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgPrimitives{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgPrimitives]())
 
 	// The postgres producer uses the Go field name (capitalized) — it does
 	// not consult the `json` tag for column naming.
@@ -82,28 +85,36 @@ func TestPrimitiveTypeMappings(t *testing.T) {
 }
 
 func TestTimeMapsToTimestampTZ(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithTime{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithTime]())
 	if !strings.Contains(out, "When timestamptz") {
 		t.Errorf("expected `When timestamptz`, got:\n%s", out)
 	}
 }
 
 func TestByteSliceMapsToByteA(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithBytes{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithBytes]())
 	if !strings.Contains(out, "Blob bytea") {
 		t.Errorf("expected `Blob bytea`, got:\n%s", out)
 	}
 }
 
 func TestStringSliceMapsToTextArray(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithStringSlice{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithStringSlice]())
 	if !strings.Contains(out, "Tags text[]") {
 		t.Errorf("expected `Tags text[]`, got:\n%s", out)
 	}
 }
 
 func TestStructFieldBecomesReference(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithReference{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithReference]())
 
 	// The inner struct also gets its own table.
 	if !strings.Contains(out, "CREATE TABLE pg_inner") {
@@ -116,7 +127,9 @@ func TestStructFieldBecomesReference(t *testing.T) {
 }
 
 func TestStructSliceCreatesAssociativeTable(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithStructSlice{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithStructSlice]())
 
 	// The associative table joins the two participating tables; we don't
 	// assert the exact schema, just that an additional CREATE TABLE for
@@ -135,7 +148,9 @@ type pgWithSkippedReference struct {
 // A struct referenced only through a `postgres:"-"` field must not be
 // materialized as a table, and the field itself must not become a column.
 func TestSkippedStructFieldOmitsTableAndColumn(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithSkippedReference{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithSkippedReference]())
 
 	if !strings.Contains(out, "CREATE TABLE pg_with_skipped_reference") {
 		t.Errorf("expected the outer table, got:\n%s", out)
@@ -159,7 +174,9 @@ type pgWithSkippedStructSlice struct {
 // A skipped struct slice must not emit an associative (join) table nor a table
 // for its element type.
 func TestSkippedStructSliceOmitsAssociativeTable(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithSkippedStructSlice{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithSkippedStructSlice]())
 
 	if strings.Contains(out, "pg_inner") {
 		t.Errorf("expected no element or associative table for a skipped struct slice, got:\n%s", out)
@@ -170,7 +187,9 @@ func TestSkippedStructSliceOmitsAssociativeTable(t *testing.T) {
 }
 
 func TestPostgresTagOverrides(t *testing.T) {
-	out := renderPG(t, reflect.TypeOf(pgWithTagOverrides{}))
+	t.Parallel()
+
+	out := renderPG(t, reflect.TypeFor[pgWithTagOverrides]())
 
 	// type:uuid should override the inferred type for the `id` field.
 	if !strings.Contains(out, "id uuid") {
@@ -191,17 +210,21 @@ func TestPostgresTagOverrides(t *testing.T) {
 }
 
 func TestAutoIdInsertedWhenNoPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	// pgPrimitives has no field tagged with primarykey, so the renderer
 	// should append a default `id uuid PRIMARY KEY DEFAULT gen_random_uuid()` line.
-	out := renderPG(t, reflect.TypeOf(pgPrimitives{}))
+	out := renderPG(t, reflect.TypeFor[pgPrimitives]())
 	if !strings.Contains(out, "id uuid PRIMARY KEY DEFAULT gen_random_uuid()") {
 		t.Errorf("expected auto id column, got:\n%s", out)
 	}
 }
 
 func TestNotNullByDefault(t *testing.T) {
+	t.Parallel()
+
 	// Required (non-omitempty) fields should pick up NOT NULL.
-	out := renderPG(t, reflect.TypeOf(pgPrimitives{}))
+	out := renderPG(t, reflect.TypeFor[pgPrimitives]())
 	if !strings.Contains(out, "NOT NULL") {
 		t.Errorf("expected at least one NOT NULL clause, got:\n%s", out)
 	}
@@ -212,11 +235,119 @@ type pgGeneric[T any] struct {
 }
 
 func TestGenericTypesUnsupported(t *testing.T) {
+	t.Parallel()
+
 	ctx := &Context{Context: typeGenerationContext.New()}
-	if err := ctx.Add(reflect.TypeOf(pgGeneric[int]{})); err != nil {
+	if err := ctx.Add(reflect.TypeFor[pgGeneric[int]]()); err != nil {
 		t.Fatalf("ctx.Add: %v", err)
 	}
 	if _, err := ctx.Render(); err == nil {
 		t.Error("expected error for generic struct, got nil")
+	}
+}
+
+// pgInterfaceDeclaration registers the type with a fresh context and returns
+// the postgres-level InterfaceDeclaration wrapper for it.
+func pgInterfaceDeclaration(t *testing.T, rt reflect.Type) *InterfaceDeclaration {
+	t.Helper()
+	ctx := &Context{Context: typeGenerationContext.New()}
+	if err := ctx.Add(rt); err != nil {
+		t.Fatalf("ctx.Add: %v", err)
+	}
+	decl, ok := ctx.TypeDeclarations[rt]
+	if !ok {
+		t.Fatal("type declaration not registered")
+	}
+	inner, ok := decl.(*type_declaration.InterfaceDeclaration)
+	if !ok {
+		t.Fatalf("expected InterfaceDeclaration, got %T", decl)
+	}
+	return &InterfaceDeclaration{InterfaceDeclaration: inner, c: ctx}
+}
+
+type pgIdTagged struct {
+	Key int64 `postgres:"id"`
+}
+
+type pgIdTypeOverride struct {
+	Key string `postgres:"id,type:uuid"`
+}
+
+type pgIdSkipped struct {
+	Key int64 `postgres:"-"`
+}
+
+type pgNoId struct {
+	Name string `postgres:"name"`
+}
+
+type pgCapitalId struct {
+	Id int64 `json:"id"`
+}
+
+type pgIdUnsupported struct {
+	Key chan int `postgres:"id"`
+}
+
+func TestResolveIdType(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		declaration *InterfaceDeclaration
+		expected    string
+		expectError bool
+	}{
+		{name: "nil declaration", declaration: nil},
+		{name: "empty wrapper", declaration: &InterfaceDeclaration{}},
+		{
+			name:        "tag-named id resolves via postgres type",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgIdTagged]()),
+			expected:    "bigint",
+		},
+		{
+			name:        "tag type override wins",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgIdTypeOverride]()),
+			expected:    "uuid",
+		},
+		{
+			name:        "skipped field is ignored",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgIdSkipped]()),
+		},
+		{
+			name:        "no id property",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgNoId]()),
+		},
+		{
+			// The comparison is against the identifier as written (Go field
+			// name or tag name), so an untagged `Id` field does not match.
+			name:        "untagged Id field does not match",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgCapitalId]()),
+		},
+		{
+			name:        "unsupported id field type",
+			declaration: pgInterfaceDeclaration(t, reflect.TypeFor[pgIdUnsupported]()),
+			expectError: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := resolveIdType(testCase.declaration)
+			if testCase.expectError {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != testCase.expected {
+				t.Errorf("resolveIdType() = %q, want %q", got, testCase.expected)
+			}
+		})
 	}
 }

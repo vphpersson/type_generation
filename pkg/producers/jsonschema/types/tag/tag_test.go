@@ -5,6 +5,8 @@ import (
 )
 
 func TestNewEmpty(t *testing.T) {
+	t.Parallel()
+
 	tag, err := New("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -24,6 +26,8 @@ func TestNewEmpty(t *testing.T) {
 }
 
 func TestNewSkip(t *testing.T) {
+	t.Parallel()
+
 	tag, err := New("-")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -40,9 +44,14 @@ func TestNewSkip(t *testing.T) {
 }
 
 func TestNewNameAndOptional(t *testing.T) {
+	t.Parallel()
+
 	tag, err := New("fieldName,optional")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if tag == nil {
+		t.Fatal("expected non-nil tag")
 	}
 	if tag.Name != "fieldName" {
 		t.Errorf("Name = %q, want %q", tag.Name, "fieldName")
@@ -53,9 +62,14 @@ func TestNewNameAndOptional(t *testing.T) {
 }
 
 func TestNewValidationConstraints(t *testing.T) {
+	t.Parallel()
+
 	tag, err := New("f,minlength:5,maxlength:100,minimum:0.5,maximum:9.5,minitems:2,maxitems:8,format:email")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if tag == nil {
+		t.Fatal("expected non-nil tag")
 	}
 
 	if tag.Name != "f" {
@@ -94,6 +108,8 @@ func TestNewValidationConstraints(t *testing.T) {
 }
 
 func TestNewInvalidNumeric(t *testing.T) {
+	t.Parallel()
+
 	cases := []string{
 		"f,minlength:abc",
 		"f,maxlength:abc",
@@ -104,6 +120,8 @@ func TestNewInvalidNumeric(t *testing.T) {
 	}
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := New(input)
 			if err == nil {
 				t.Errorf("expected error for %q, got nil", input)
@@ -113,9 +131,14 @@ func TestNewInvalidNumeric(t *testing.T) {
 }
 
 func TestNewUnknownOptionFallsToOtherOptions(t *testing.T) {
+	t.Parallel()
+
 	tag, err := New("f,unknown_flag,custom:value")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if tag == nil {
+		t.Fatal("expected non-nil tag")
 	}
 
 	want := map[string]bool{"unknown_flag": true, "custom:value": true}
